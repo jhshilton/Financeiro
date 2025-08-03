@@ -1,592 +1,492 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gerenciador de Obras</title>
-    <!-- Inclui o Tailwind CSS para estilização -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6;
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc } from 'firebase/firestore';
+
+const firebaseConfig = typeof _firebase_config !== 'undefined' ? JSON.parse(_firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+const App = () => {
+    const [userData, setUserData] = useState({
+        obraData: {},
+        adiantamentosData: [],
+        servicosExtrasData: []
+    });
+    const [userId, setUserId] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [showInitialScreen, setShowInitialScreen] = useState(true);
+    const [isEditingObra, setIsEditingObra] = useState(false);
+    const [db, setDb] = useState(null);
+    const [auth, setAuth] = useState(null);
+    const [inputUserId, setInputUserId] = useState('');
+    const [error, setError] = useState(null);
+
+    // Efeito para inicializar o Firebase e autenticar
+    useEffect(() => {
+        try {
+            const app = initializeApp(firebaseConfig);
+            const firestoreDb = getFirestore(app);
+            const firebaseAuth = getAuth(app);
+            setDb(firestoreDb);
+            setAuth(firebaseAuth);
+
+            const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    setIsAuthReady(true);
+                } else {
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(firebaseAuth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(firebaseAuth);
+                        }
+                    } catch (e) {
+                        console.error("Erro na autenticação:", e);
+                        setError("Erro na autenticação. Tente recarregar a página.");
+                    }
+                }
+                setLoading(false);
+            });
+
+            return () => unsubscribe();
+        } catch (e) {
+            console.error("Erro ao inicializar o Firebase:", e);
+            setError("Erro ao iniciar o aplicativo. Verifique sua conexão com a internet.");
+            setLoading(false);
         }
-        .container {
-            max-width: 640px;
-            margin-left: auto;
-            margin-right: auto;
+    }, []);
+
+    // Efeito para sincronizar os dados com o Firestore
+    useEffect(() => {
+        if (!isAuthReady || !db || !userId) return;
+
+        const obraRef = doc(db, 'artifacts', appId, 'users', userId, 'data', 'obra');
+        const unsubscribe = onSnapshot(obraRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setUserData(data);
+            } else {
+                setUserData({
+                    obraData: {},
+                    adiantamentosData: [],
+                    servicosExtrasData: []
+                });
+            }
+        });
+
+        // Oculta a tela inicial e mostra o app principal
+        setShowInitialScreen(false);
+
+        return () => unsubscribe();
+    }, [isAuthReady, db, userId]);
+
+    // Funções de utilidade
+    const formatCurrency = (value) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    const formatDate = (dateString) => dateString ? new Date(dateString).toLocaleDateString('pt-BR') : 'N/A';
+
+    // Salva os dados no Firestore
+    const saveUserData = async (data) => {
+        if (!db || !userId) return;
+        try {
+            const obraRef = doc(db, 'artifacts', appId, 'users', userId, 'data', 'obra');
+            await setDoc(obraRef, data);
+        } catch (e) {
+            console.error("Erro ao salvar dados:", e);
+            setError("Erro ao salvar dados. Verifique sua conexão.");
         }
-        .input-field {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #d1d5db;
-            border-radius: 0.5rem;
-            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-            transition: all 0.2s;
-        }
-        .input-field:focus {
-            outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
-        }
-    </style>
-</head>
-<body class="bg-gray-100 p-4">
+    };
 
-    <!-- Tela de Carregamento -->
-    <div id="loading-screen" class="flex justify-center items-center h-screen">
-        <div class="text-gray-600">Carregando...</div>
-    </div>
-
-    <!-- Tela Inicial -->
-    <div id="initial-screen" class="hidden flex flex-col items-center justify-center h-screen text-center">
-        <h1 class="text-3xl font-bold text-gray-900 mb-4">Bem-vindo, Hilton Serviço!</h1>
-        <p class="text-center text-gray-600 mb-8">
-            Para começar, escolha uma das opções abaixo.
-        </p>
-        <button id="new-project-btn" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-600 transition-colors mb-4">
-            Novo Projeto ✨
-        </button>
-        <div class="w-full text-center my-4 text-gray-500">
-            <p>ou</p>
-        </div>
-        <div class="w-full bg-white rounded-xl shadow-lg p-6">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900">Carregar Projeto Existente</h2>
-            <p class="text-sm text-gray-600 mb-4">
-                Cole o seu ID de usuário para carregar os dados de outro dispositivo.
-            </p>
-            <div class="flex flex-col space-y-4">
-                <input id="input-user-id" type="text" placeholder="Cole seu ID de usuário aqui" class="input-field" />
-                <button id="load-project-btn" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition-colors">
-                    Carregar Dados
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Aplicativo Principal -->
-    <div id="main-app" class="hidden container">
-        <header class="text-center mt-8 mb-6">
-            <h1 class="text-3xl font-bold text-gray-900">Gerenciador de Obras</h1>
-            <p class="text-gray-600 mt-2">Acompanhe adiantamentos e o saldo da sua obra.</p>
-            
-            <div class="mt-4 p-4 bg-yellow-100 rounded-xl border-2 border-yellow-300 flex flex-col sm:flex-row items-center justify-between">
-                <div class="flex flex-col text-left">
-                    <span class="text-sm font-bold text-gray-800">Seu ID de Usuário (Importante)</span>
-                    <span id="display-user-id" class="text-sm font-mono break-all text-gray-600 mt-1"></span>
-                </div>
-                <button id="copy-user-id-btn" class="mt-2 sm:mt-0 px-4 py-2 bg-yellow-500 text-white text-sm font-bold rounded-full hover:bg-yellow-600 transition-colors">
-                    Copiar
-                </button>
-            </div>
-        </header>
-        
-        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-semibold text-gray-900">Detalhes da Obra</h2>
-                <button id="edit-obra-btn" class="bg-blue-500 text-white rounded-full px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
-                    Editar
-                </button>
-            </div>
-            
-            <div id="display-obra-data" class="space-y-3">
-                <div class="flex items-center space-x-3 text-lg">
-                    <span class="text-blue-500">🏠</span>
-                    <span><strong class="font-semibold">Obra:</strong> <span id="display-obra-nome">N/A</span></span>
-                </div>
-                <div class="flex items-center space-x-3 text-lg">
-                    <span class="text-blue-500">💲</span>
-                    <span><strong class="font-semibold">Mão de Obra:</strong> <span id="display-obra-valor">R$ 0,00</span></span>
-                </div>
-                <div class="flex items-center space-x-3 text-lg">
-                    <span class="text-blue-500">🗓</span>
-                    <span><strong class="font-semibold">Início:</strong> <span id="display-obra-data-inicio">N/A</span></span>
-                </div>
-                <div class="flex items-center space-x-3 text-lg">
-                    <span class="text-blue-500">📝</span>
-                    <span><strong class="font-semibold">Serviço:</strong> <span id="display-obra-servico">N/A</span></span>
-                </div>
-            </div>
-
-            <form id="edit-obra-form" class="hidden space-y-4">
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Nome da Obra:</label>
-                    <input id="input-obra-nome" type="text" placeholder="Ex: Reforma da Casa" class="input-field" />
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Início da Obra:</label>
-                    <input id="input-obra-data" type="date" class="input-field" />
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Valor da Mão de Obra (R$):</label>
-                    <input id="input-obra-valor" type="number" placeholder="0.00" class="input-field" />
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Metros Quadrados (m²):</label>
-                    <input id="input-obra-metro" type="number" placeholder="0" class="input-field" />
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Descrição do Serviço:</label>
-                    <textarea id="input-obra-servico" rows="3" placeholder="Ex: Assentamento de piso, pintura, reboco." class="input-field"></textarea>
-                </div>
-                <button type="submit" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-600 transition-colors">
-                    Salvar Detalhes
-                </button>
-                <button type="button" id="generate-checklist-btn" class="w-full bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-indigo-600 transition-colors">
-                    Gerar Checklist ✨
-                </button>
-            </form>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900">Adicionar Adiantamento (Vale)</h2>
-            <form id="add-adiantamento-form" class="space-y-4">
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Data:</label>
-                    <input type="date" name="data" required class="input-field" />
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Descrição:</label>
-                    <input type="text" name="descricao" placeholder="Ex: Vale semanal" class="input-field" />
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Valor (R$):</label>
-                    <input type="number" name="valor" placeholder="0.00" required class="input-field" />
-                </div>
-                <button type="submit" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition-colors">
-                    <span class="text-lg">+</span> Adicionar Vale
-                </button>
-            </form>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900">Histórico de Adiantamentos</h2>
-            <ul id="adiantamentos-list" class="divide-y divide-gray-200">
-                <!-- Adiantamentos serão renderizados aqui -->
-            </ul>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900">Adicionar Serviços Extras</h2>
-            <form id="add-servico-extra-form" class="space-y-4">
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Data:</label>
-                    <input type="date" name="data" required class="input-field" />
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Descrição:</label>
-                    <input type="text" name="descricao" placeholder="Ex: Compra de cimento, trabalho extra" class="input-field" />
-                </div>
-                <div class="flex flex-col">
-                    <label class="text-sm font-medium mb-1">Valor (R$):</label>
-                    <input type="number" name="valor" placeholder="0.00" required class="input-field" />
-                </div>
-                <button type="submit" class="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-orange-600 transition-colors">
-                    <span class="text-lg">+</span> Adicionar Serviço Extra
-                </button>
-            </form>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900">Histórico de Serviços Extras</h2>
-            <ul id="servicos-extras-list" class="divide-y divide-gray-200">
-                <!-- Serviços extras serão renderizados aqui -->
-            </ul>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h2 class="text-xl font-semibold mb-4 text-gray-900">Resumo Financeiro</h2>
-            <div class="grid grid-cols-3 gap-4 text-center">
-                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
-                    <p class="text-sm font-medium text-gray-500">Total da Obra</p>
-                    <p id="total-obra-valor" class="text-lg font-bold text-gray-800">R$ 0,00</p>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
-                    <p class="text-sm font-medium text-gray-500">Total Adiantado</p>
-                    <p id="total-adiantado-valor" class="text-lg font-bold text-green-600">R$ 0,00</p>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
-                    <p class="text-sm font-medium text-gray-500">Saldo Restante</p>
-                    <p id="saldo-restante-valor" class="text-lg font-bold text-green-600">R$ 0,00</p>
-                </div>
-            </div>
-            <button id="generate-report-btn" class="w-full bg-purple-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-purple-600 transition-colors mt-4">
-                Gerar Relatório ✨
-            </button>
-        </div>
-
-        <footer class="text-center text-sm text-gray-500 mt-6 pb-4">
-            <p>Desenvolvido com ❤</p>
-        </footer>
-    </div>
-
-    <!-- Modal de Alerta -->
-    <div id="custom-alert-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
-        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div class="mt-3 text-center">
-                <h3 id="modal-title" class="text-lg leading-6 font-medium text-gray-900"></h3>
-                <div class="mt-2 px-7 py-3">
-                    <p id="modal-content" class="text-sm text-gray-500"></p>
-                </div>
-                <div class="items-center px-4 py-3">
-                    <button id="close-modal-btn" class="px-4 py-2 bg-blue-500 text-white text-base font-medium rounded-md w-full shadow-sm hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        OK
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Inclui as bibliotecas do Firebase -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Variáveis de ambiente
-        const firebaseConfig = typeof _firebase_config !== 'undefined' ? JSON.parse(_firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-        // Variáveis globais para o estado do aplicativo
-        let db, auth;
-        let userId = null;
-        let isEditingObra = false;
-        let userData = {
+    // Funções de manipulação do UI e dados
+    const handleNewProject = async () => {
+        const newUserData = {
             obraData: {},
             adiantamentosData: [],
             servicosExtrasData: []
         };
-        
-        // Funções de utilidade
-        const formatCurrency = (value) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-        const formatDate = (dateString) => dateString ? new Date(dateString).toLocaleDateString('pt-BR') : 'N/A';
+        await saveUserData(newUserData);
+        setUserId(auth.currentUser.uid);
+        setShowInitialScreen(false);
+    };
 
-        const showCustomAlert = (title, message) => {
-            document.getElementById('modal-title').textContent = title;
-            document.getElementById('modal-content').textContent = message;
-            document.getElementById('custom-alert-modal').classList.remove('hidden');
-        };
+    const handleLoadProject = async () => {
+        if (!inputUserId) {
+            alert('Por favor, insira um ID de usuário.');
+            return;
+        }
 
-        const hideCustomAlert = () => {
-            document.getElementById('custom-alert-modal').classList.add('hidden');
-        };
-
-        // Renderiza o aplicativo na tela
-        const renderApp = () => {
-            // Esconde a tela de carregamento e inicial, mostra o app principal
-            document.getElementById('loading-screen').classList.add('hidden');
-            document.getElementById('initial-screen').classList.add('hidden');
-            document.getElementById('main-app').classList.remove('hidden');
-
-            // Renderiza os dados da obra
-            if (isEditingObra) {
-                document.getElementById('display-obra-data').classList.add('hidden');
-                document.getElementById('edit-obra-form').classList.remove('hidden');
-                document.getElementById('edit-obra-btn').textContent = 'Cancelar';
-
-                document.getElementById('input-obra-nome').value = userData.obraData.nome || '';
-                document.getElementById('input-obra-data').value = userData.obraData.dataInicio || '';
-                document.getElementById('input-obra-valor').value = userData.obraData.valorMaoObra || 0;
-                document.getElementById('input-obra-metro').value = userData.obraData.metroQuadrado || 0;
-                document.getElementById('input-obra-servico').value = userData.obraData.servico || '';
+        try {
+            const obraRef = doc(db, 'artifacts', appId, 'users', inputUserId, 'data', 'obra');
+            const docSnap = await getDoc(obraRef);
+            if (docSnap.exists()) {
+                setUserId(inputUserId);
+                setShowInitialScreen(false);
             } else {
-                document.getElementById('display-obra-data').classList.remove('hidden');
-                document.getElementById('edit-obra-form').classList.add('hidden');
-                document.getElementById('edit-obra-btn').textContent = 'Editar';
-
-                document.getElementById('display-obra-nome').textContent = userData.obraData.nome || 'N/A';
-                document.getElementById('display-obra-valor').textContent = formatCurrency(userData.obraData.valorMaoObra || 0);
-                document.getElementById('display-obra-data-inicio').textContent = formatDate(userData.obraData.dataInicio);
-                document.getElementById('display-obra-servico').textContent = userData.obraData.servico || 'N/A';
+                alert('ID de usuário não encontrado. Verifique se o ID está correto.');
             }
-            
-            // Renderiza o ID do usuário
-            document.getElementById('display-user-id').textContent = userId || 'N/A';
+        } catch (e) {
+            console.error("Erro ao carregar dados:", e);
+            alert("Erro ao carregar dados. Verifique o ID e sua conexão.");
+        }
+    };
 
-            // Renderiza a lista de adiantamentos
-            const adiantamentosList = document.getElementById('adiantamentos-list');
-            adiantamentosList.innerHTML = userData.adiantamentosData.length > 0
-                ? userData.adiantamentosData.map(item => `
-                    <li class="py-4 flex items-center justify-between">
-                        <div>
-                            <p class="font-medium text-gray-900">${item.descricao || 'Adiantamento'}</p>
-                            <p class="text-sm text-gray-500">${formatDate(item.data)}</p>
-                        </div>
-                        <div class="flex items-center space-x-2">
-                            <p class="text-md font-semibold text-gray-700">${formatCurrency(item.valor)}</p>
-                            <button class="remove-adiantamento-btn p-1 text-red-500 rounded-full hover:bg-red-100 transition-colors" data-id="${item.id}">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+    const handleSaveObra = async (e) => {
+        e.preventDefault();
+        const obraName = document.getElementById('input-obra-nome').value;
+        const obraData = {
+            ...userData.obraData,
+            nome: obraName,
+            dataInicio: document.getElementById('input-obra-data').value,
+            valorMaoObra: parseFloat(document.getElementById('input-obra-valor').value) || 0,
+            metroQuadrado: parseFloat(document.getElementById('input-obra-metro').value) || 0,
+            servico: document.getElementById('input-obra-servico').value,
+        };
+        const updatedUserData = { ...userData, obraData };
+        await saveUserData(updatedUserData);
+        setIsEditingObra(false);
+    };
+
+    const handleAddAdiantamento = async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const newAdiantamento = {
+            id: Date.now(),
+            data: formData.get('data'),
+            descricao: formData.get('descricao'),
+            valor: parseFloat(formData.get('valor')) || 0
+        };
+        const updatedUserData = { ...userData, adiantamentosData: [...userData.adiantamentosData, newAdiantamento] };
+        await saveUserData(updatedUserData);
+        e.target.reset();
+    };
+
+    const handleRemoveAdiantamento = async (id) => {
+        const updatedAdiantamentos = userData.adiantamentosData.filter(item => item.id !== id);
+        const updatedUserData = { ...userData, adiantamentosData: updatedAdiantamentos };
+        await saveUserData(updatedUserData);
+    };
+
+    const handleAddServicoExtra = async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const newServicoExtra = {
+            id: Date.now(),
+            data: formData.get('data'),
+            descricao: formData.get('descricao'),
+            valor: parseFloat(formData.get('valor')) || 0
+        };
+        const updatedUserData = { ...userData, servicosExtrasData: [...userData.servicosExtrasData, newServicoExtra] };
+        await saveUserData(updatedUserData);
+        e.target.reset();
+    };
+
+    const handleRemoveServicoExtra = async (id) => {
+        const updatedServicosExtras = userData.servicosExtrasData.filter(item => item.id !== id);
+        const updatedUserData = { ...userData, servicosExtrasData: updatedServicosExtras };
+        await saveUserData(updatedUserData);
+    };
+
+    // Cálculos para o resumo financeiro
+    const totalAdiantado = userData.adiantamentosData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+    const totalServicosExtras = userData.servicosExtrasData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+    const totalObra = (userData.obraData.valorMaoObra || 0) + totalServicosExtras;
+    const saldoRestante = totalObra - totalAdiantado;
+
+    // Gerar Checklist
+    const generateChecklist = () => {
+        const servico = userData.obraData.servico?.trim() || '';
+        if (!servico) {
+            alert('Por favor, preencha a Descrição do Serviço para gerar uma checklist.');
+            return;
+        }
+
+        let checklistItems = ['Verificar materiais necessários', 'Limpar e preparar o local', 'Realizar medições e marcações'];
+        if (servico.toLowerCase().includes('pintura')) {
+            checklistItems = ['Proteger áreas não pintadas', 'Lixar e limpar as paredes', 'Aplicar massa corrida', 'Aplicar selador', 'Dar demãos de tinta'];
+        } else if (servico.toLowerCase().includes('piso')) {
+            checklistItems = ['Remover o piso antigo', 'Preparar a base (contrapiso)', 'Assentar o novo piso', 'Aplicar rejunte', 'Limpar e proteger o novo piso'];
+        }
+        
+        const listHtml = checklistItems.map(item => <li><input type="checkbox" class="mr-2">${item}</li>).join('');
+        alert(Checklist Gerada:\n${listHtml.replace(/<[^>]*>?/gm, '')});
+    };
+
+    // Gerar Relatório
+    const generateReport = () => {
+        const adiantamentosReport = userData.adiantamentosData.map(a => - Data: ${formatDate(a.data)}, Descrição: ${a.descricao}, Valor: ${formatCurrency(a.valor)}).join('\n') || '- Nenhum adiantamento registrado.';
+        const servicosExtrasReport = userData.servicosExtrasData.map(a => - Data: ${formatDate(a.data)}, Descrição: ${a.descricao}, Valor: ${formatCurrency(a.valor)}).join('\n') || '- Nenhum serviço extra registrado.';
+        
+        const reportText = `
+            Relatório Financeiro
+            ------------------------
+            Nome da Obra: ${userData.obraData.nome || 'N/A'}
+            Início da Obra: ${formatDate(userData.obraData.dataInicio)}
+            Serviço: ${userData.obraData.servico || 'N/A'}
+
+            Histórico de Adiantamentos:
+            ${adiantamentosReport}
+
+            Serviços Extras:
+            ${servicosExtrasReport}
+            
+            Resumo Financeiro:
+            Valor da Mão de Obra: ${formatCurrency(userData.obraData.valorMaoObra || 0)}
+            Total da Obra (com extras): ${formatCurrency(totalObra)}
+            Total Adiantado: ${formatCurrency(totalAdiantado)}
+            Saldo Restante: ${formatCurrency(saldoRestante)}
+        `;
+        alert(reportText);
+    };
+
+    // Se estiver carregando, mostra a tela de loading
+    if (loading) {
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <div className="text-gray-600">Carregando...</div>
+            </div>
+        );
+    }
+    
+    // Se houver um erro, mostra a mensagem de erro
+    if (error) {
+        return (
+            <div className="flex justify-center items-center h-screen p-4 text-center">
+                <div className="text-red-600 font-bold text-lg">{error}</div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="container">
+            {showInitialScreen && (
+                <div className="flex flex-col items-center justify-center h-screen text-center">
+                    <h1 className="text-3xl font-bold text-gray-900 mb-4">Bem-vindo, Hilton Serviço!</h1>
+                    <p className="text-center text-gray-600 mb-8">
+                        Para começar, escolha uma das opções abaixo.
+                    </p>
+                    <button onClick={handleNewProject} className="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-600 transition-colors mb-4">
+                        Novo Projeto ✨
+                    </button>
+                    <div className="w-full text-center my-4 text-gray-500">
+                        <p>ou</p>
+                    </div>
+                    <div className="w-full bg-white rounded-xl shadow-lg p-6">
+                        <h2 className="text-xl font-semibold mb-4 text-gray-900">Carregar Projeto Existente</h2>
+                        <p className="text-sm text-gray-600 mb-4">
+                            Cole o seu ID de usuário para carregar os dados de outro dispositivo.
+                        </p>
+                        <div className="flex flex-col space-y-4">
+                            <input
+                                id="input-user-id"
+                                type="text"
+                                placeholder="Cole seu ID de usuário aqui"
+                                value={inputUserId}
+                                onChange={(e) => setInputUserId(e.target.value)}
+                            />
+                            <button onClick={handleLoadProject} className="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition-colors">
+                                Carregar Dados
                             </button>
                         </div>
-                    </li>
-                `).join('')
-                : '<p class="text-center text-gray-500 py-4">Nenhum adiantamento registrado.</p>';
+                    </div>
+                </div>
+            )}
 
-            // Renderiza a lista de serviços extras
-            const servicosExtrasList = document.getElementById('servicos-extras-list');
-            servicosExtrasList.innerHTML = userData.servicosExtrasData.length > 0
-                ? userData.servicosExtrasData.map(item => `
-                    <li class="py-4 flex items-center justify-between">
-                        <div>
-                            <p class="font-medium text-gray-900">${item.descricao || 'Serviço Extra'}</p>
-                            <p class="text-sm text-gray-500">${formatDate(item.data)}</p>
-                        </div>
-                        <div class="flex items-center space-x-2">
-                            <p class="text-md font-semibold text-gray-700">${formatCurrency(item.valor)}</p>
-                            <button class="remove-servico-extra-btn p-1 text-red-500 rounded-full hover:bg-red-100 transition-colors" data-id="${item.id}">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+            {!showInitialScreen && (
+                <div id="main-app">
+                    <header className="text-center mt-8 mb-6">
+                        <h1 className="text-3xl font-bold text-gray-900">Gerenciador de Obras</h1>
+                        <p className="text-gray-600 mt-2">Acompanhe adiantamentos e o saldo da sua obra.</p>
+                        
+                        <div className="mt-4 p-4 bg-yellow-100 rounded-xl border-2 border-yellow-300 flex flex-col sm:flex-row items-center justify-between">
+                            <div className="flex flex-col text-left">
+                                <span className="text-sm font-bold text-gray-800">Seu ID de Usuário (Importante)</span>
+                                <span id="display-user-id" className="text-sm font-mono break-all text-gray-600 mt-1">{userId}</span>
+                            </div>
+                            <button onClick={() => navigator.clipboard.writeText(userId)} className="mt-2 sm:mt-0 px-4 py-2 bg-yellow-500 text-white text-sm font-bold rounded-full hover:bg-yellow-600 transition-colors">
+                                Copiar
                             </button>
                         </div>
-                    </li>
-                `).join('')
-                : '<p class="text-center text-gray-500 py-4">Nenhum serviço extra registrado.</p>';
+                    </header>
+                    
+                    <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-semibold text-gray-900">Detalhes da Obra</h2>
+                            <button onClick={() => setIsEditingObra(!isEditingObra)} className="bg-blue-500 text-white rounded-full px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
+                                {isEditingObra ? 'Cancelar' : 'Editar'}
+                            </button>
+                        </div>
+                        
+                        {!isEditingObra ? (
+                            <div className="space-y-3">
+                                <div className="flex items-center space-x-3 text-lg">
+                                    <span className="text-blue-500">🏠</span>
+                                    <span><strong className="font-semibold">Obra:</strong> <span id="display-obra-nome">{userData.obraData.nome || 'N/A'}</span></span>
+                                </div>
+                                <div className="flex items-center space-x-3 text-lg">
+                                    <span className="text-blue-500">💲</span>
+                                    <span><strong className="font-semibold">Mão de Obra:</strong> <span id="display-obra-valor">{formatCurrency(userData.obraData.valorMaoObra || 0)}</span></span>
+                                </div>
+                                <div className="flex items-center space-x-3 text-lg">
+                                    <span className="text-blue-500">🗓</span>
+                                    <span><strong className="font-semibold">Início:</strong> <span id="display-obra-data-inicio">{formatDate(userData.obraData.dataInicio)}</span></span>
+                                </div>
+                                <div className="flex items-center space-x-3 text-lg">
+                                    <span className="text-blue-500">📝</span>
+                                    <span><strong className="font-semibold">Serviço:</strong> <span id="display-obra-servico">{userData.obraData.servico || 'N/A'}</span></span>
+                                </div>
+                            </div>
+                        ) : (
+                            <form onSubmit={handleSaveObra} className="space-y-4">
+                                <div className="flex flex-col">
+                                    <label className="text-sm font-medium mb-1">Nome da Obra:</label>
+                                    <input id="input-obra-nome" type="text" placeholder="Ex: Reforma da Casa" defaultValue={userData.obraData.nome} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-sm font-medium mb-1">Início da Obra:</label>
+                                    <input id="input-obra-data" type="date" defaultValue={userData.obraData.dataInicio} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-sm font-medium mb-1">Valor da Mão de Obra (R$):</label>
+                                    <input id="input-obra-valor" type="number" placeholder="0.00" defaultValue={userData.obraData.valorMaoObra} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-sm font-medium mb-1">Metros Quadrados (m²):</label>
+                                    <input id="input-obra-metro" type="number" placeholder="0" defaultValue={userData.obraData.metroQuadrado} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <label className="text-sm font-medium mb-1">Descrição do Serviço:</label>
+                                    <textarea id="input-obra-servico" rows="3" placeholder="Ex: Assentamento de piso, pintura, reboco." defaultValue={userData.obraData.servico}></textarea>
+                                </div>
+                                <button type="submit" className="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-600 transition-colors">
+                                    Salvar Detalhes
+                                </button>
+                                <button type="button" onClick={generateChecklist} className="w-full bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-indigo-600 transition-colors">
+                                    Gerar Checklist ✨
+                                </button>
+                            </form>
+                        )}
+                    </div>
 
-            // Renderiza o resumo financeiro
-            const totalAdiantado = userData.adiantamentosData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
-            const totalServicosExtras = userData.servicosExtrasData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
-            const totalObra = (userData.obraData.valorMaoObra || 0) + totalServicosExtras;
-            const saldoRestante = totalObra - totalAdiantado;
+                    <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <h2 className="text-xl font-semibold mb-4 text-gray-900">Adicionar Adiantamento (Vale)</h2>
+                        <form onSubmit={handleAddAdiantamento} className="space-y-4">
+                            <div className="flex flex-col">
+                                <label className="text-sm font-medium mb-1">Data:</label>
+                                <input type="date" name="data" required />
+                            </div>
+                            <div className="flex flex-col">
+                                <label className="text-sm font-medium mb-1">Descrição:</label>
+                                <input type="text" name="descricao" placeholder="Ex: Vale semanal" />
+                            </div>
+                            <div className="flex flex-col">
+                                <label className="text-sm font-medium mb-1">Valor (R$):</label>
+                                <input type="number" name="valor" placeholder="0.00" required />
+                            </div>
+                            <button type="submit" className="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition-colors">
+                                <span className="text-lg">+</span> Adicionar Vale
+                            </button>
+                        </form>
+                    </div>
 
-            document.getElementById('total-obra-valor').textContent = formatCurrency(totalObra);
-            document.getElementById('total-adiantado-valor').textContent = formatCurrency(totalAdiantado);
-            
-            const saldoElement = document.getElementById('saldo-restante-valor');
-            saldoElement.textContent = formatCurrency(saldoRestante);
-            saldoElement.classList.toggle('text-red-600', saldoRestante < 0);
-            saldoElement.classList.toggle('text-green-600', saldoRestante >= 0);
-        };
+                    <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <h2 className="text-xl font-semibold mb-4 text-gray-900">Histórico de Adiantamentos</h2>
+                        <ul className="divide-y divide-gray-200">
+                            {userData.adiantamentosData.length > 0 ? (
+                                userData.adiantamentosData.map(adiantamento => (
+                                    <li key={adiantamento.id} className="py-4 flex items-center justify-between">
+                                        <div>
+                                            <p className="font-medium text-gray-900">{adiantamento.descricao || 'Adiantamento'}</p>
+                                            <p className="text-sm text-gray-500">{formatDate(adiantamento.data)}</p>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <p className="text-md font-semibold text-gray-700">{formatCurrency(adiantamento.valor)}</p>
+                                            <button onClick={() => handleRemoveAdiantamento(adiantamento.id)} className="p-1 text-red-500 rounded-full hover:bg-red-100 transition-colors">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" className="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                            </button>
+                                        </div>
+                                    </li>
+                                ))
+                            ) : (
+                                <p className="text-center text-gray-500 py-4">Nenhum adiantamento registrado.</p>
+                            )}
+                        </ul>
+                    </div>
 
-        // Salva os dados no Firestore
-        const saveUserData = async (data) => {
-            if (!db || !userId) {
-                showCustomAlert("Erro de Sincronização", "Não foi possível salvar os dados. Verifique a sua conexão.");
-                return;
-            }
-            try {
-                const obraRef = doc(db, 'artifacts', appId, 'users', userId, 'data', 'obra');
-                await setDoc(obraRef, data);
-            } catch (e) {
-                console.error("Erro ao salvar dados:", e);
-                showCustomAlert("Erro de Sincronização", "Não foi possível salvar os dados. Tente novamente.");
-            }
-        };
+                    <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <h2 className="text-xl font-semibold mb-4 text-gray-900">Adicionar Serviços Extras</h2>
+                        <form onSubmit={handleAddServicoExtra} className="space-y-4">
+                            <div className="flex flex-col">
+                                <label className="text-sm font-medium mb-1">Data:</label>
+                                <input type="date" name="data" required />
+                            </div>
+                            <div className="flex flex-col">
+                                <label className="text-sm font-medium mb-1">Descrição:</label>
+                                <input type="text" name="descricao" placeholder="Ex: Compra de cimento, trabalho extra" />
+                            </div>
+                            <div className="flex flex-col">
+                                <label className="text-sm font-medium mb-1">Valor (R$):</label>
+                                <input type="number" name="valor" placeholder="0.00" required />
+                            </div>
+                            <button type="submit" className="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-orange-600 transition-colors">
+                                <span className="text-lg">+</span> Adicionar Serviço Extra
+                            </button>
+                        </form>
+                    </div>
 
-        // Event Listeners
-        window.onload = async () => {
-            // Inicializa o Firebase
-            try {
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-            } catch (e) {
-                console.error("Erro ao inicializar o Firebase:", e);
-                showCustomAlert("Erro Crítico", "Não foi possível iniciar o aplicativo. Verifique sua conexão com a internet.");
-                return;
-            }
+                    <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <h2 className="text-xl font-semibold mb-4 text-gray-900">Histórico de Serviços Extras</h2>
+                        <ul className="divide-y divide-gray-200">
+                            {userData.servicosExtrasData.length > 0 ? (
+                                userData.servicosExtrasData.map(servico => (
+                                    <li key={servico.id} className="py-4 flex items-center justify-between">
+                                        <div>
+                                            <p className="font-medium text-gray-900">{servico.descricao || 'Serviço Extra'}</p>
+                                            <p className="text-sm text-gray-500">{formatDate(servico.data)}</p>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <p className="text-md font-semibold text-gray-700">{formatCurrency(servico.valor)}</p>
+                                            <button onClick={() => handleRemoveServicoExtra(servico.id)} className="p-1 text-red-500 rounded-full hover:bg-red-100 transition-colors">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" className="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                            </button>
+                                        </div>
+                                    </li>
+                                ))
+                            ) : (
+                                <p className="text-center text-gray-500 py-4">Nenhum serviço extra registrado.</p>
+                            )}
+                        </ul>
+                    </div>
 
-            // Autentica o usuário
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    userId = user.uid;
-                    document.getElementById('loading-screen').classList.add('hidden');
-                    document.getElementById('initial-screen').classList.remove('hidden');
-                } else {
-                    try {
-                        if (initialAuthToken) {
-                            await signInWithCustomToken(auth, initialAuthToken);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                    } catch (e) {
-                        console.error("Erro na autenticação:", e);
-                        showCustomAlert("Erro de Autenticação", "Não foi possível autenticar. Tente recarregar a página.");
-                    }
-                }
-            });
-        };
+                    <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <h2 className="text-xl font-semibold mb-4 text-gray-900">Resumo Financeiro</h2>
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                            <div className="bg-gray-50 p-4 rounded-xl shadow-inner">
+                                <p className="text-sm font-medium text-gray-500">Total da Obra</p>
+                                <p id="total-obra-valor" className="text-lg font-bold text-gray-800">{formatCurrency(totalObra)}</p>
+                            </div>
+                            <div className="bg-gray-50 p-4 rounded-xl shadow-inner">
+                                <p className="text-sm font-medium text-gray-500">Total Adiantado</p>
+                                <p id="total-adiantado-valor" className="text-lg font-bold text-green-600">{formatCurrency(totalAdiantado)}</p>
+                            </div>
+                            <div className="bg-gray-50 p-4 rounded-xl shadow-inner">
+                                <p className="text-sm font-medium text-gray-500">Saldo Restante</p>
+                                <p id="saldo-restante-valor" className={text-lg font-bold ${saldoRestante < 0 ? 'text-red-600' : 'text-green-600'}}>{formatCurrency(saldoRestante)}</p>
+                            </div>
+                        </div>
+                        <button onClick={generateReport} className="w-full bg-purple-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-purple-600 transition-colors mt-4">
+                            Gerar Relatório ✨
+                        </button>
+                    </div>
 
-        // Botão Novo Projeto
-        document.getElementById('new-project-btn').addEventListener('click', async () => {
-            userData = {
-                obraData: {},
-                adiantamentosData: [],
-                servicosExtrasData: []
-            };
-            await saveUserData(userData);
-            
-            const obraRef = doc(db, 'artifacts', appId, 'users', userId, 'data', 'obra');
-            onSnapshot(obraRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    userData = docSnap.data();
-                    renderApp();
-                }
-            });
+                    <footer className="text-center text-sm text-gray-500 mt-6 pb-4">
+                        <p>Desenvolvido com ❤</p>
+                    </footer>
+                </div>
+            )}
+        </div>
+    );
+};
 
-            document.getElementById('initial-screen').classList.add('hidden');
-            document.getElementById('main-app').classList.remove('hidden');
-        });
-
-        // Botão Carregar Projeto
-        document.getElementById('load-project-btn').addEventListener('click', async () => {
-            const inputUserId = document.getElementById('input-user-id').value;
-            if (!inputUserId) {
-                showCustomAlert("Aviso", "Por favor, insira um ID de usuário.");
-                return;
-            }
-
-            try {
-                const obraRef = doc(db, 'artifacts', appId, 'users', inputUserId, 'data', 'obra');
-                const docSnap = await getDoc(obraRef);
-                if (docSnap.exists()) {
-                    userId = inputUserId;
-                    onSnapshot(obraRef, (docSnap) => {
-                        userData = docSnap.data();
-                        renderApp();
-                    });
-                    document.getElementById('initial-screen').classList.add('hidden');
-                    document.getElementById('main-app').classList.remove('hidden');
-                } else {
-                    showCustomAlert("Erro", "ID de usuário não encontrado.");
-                }
-            } catch (e) {
-                console.error("Erro ao carregar dados:", e);
-                showCustomAlert("Erro", "Erro ao carregar dados. Verifique o ID e sua conexão.");
-            }
-        });
-
-        // Botão Copiar ID
-        document.getElementById('copy-user-id-btn').addEventListener('click', () => {
-            const userIdText = document.getElementById('display-user-id').textContent;
-            navigator.clipboard.writeText(userIdText).then(() => {
-                showCustomAlert("Sucesso", "ID de usuário copiado para a área de transferência!");
-            }).catch(err => {
-                showCustomAlert("Erro", "Não foi possível copiar o ID. Tente novamente.");
-            });
-        });
-
-        // Botão Editar Obra
-        document.getElementById('edit-obra-btn').addEventListener('click', () => {
-            isEditingObra = !isEditingObra;
-            renderApp();
-        });
-
-        // Formulário de Edição da Obra
-        document.getElementById('edit-obra-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            userData.obraData = {
-                nome: document.getElementById('input-obra-nome').value,
-                dataInicio: document.getElementById('input-obra-data').value,
-                valorMaoObra: parseFloat(document.getElementById('input-obra-valor').value) || 0,
-                metroQuadrado: parseFloat(document.getElementById('input-obra-metro').value) || 0,
-                servico: document.getElementById('input-obra-servico').value,
-            };
-            await saveUserData(userData);
-            isEditingObra = false;
-            renderApp();
-        });
-
-        // Formulário de Adiantamento
-        document.getElementById('add-adiantamento-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const form = e.target;
-            const newAdiantamento = {
-                id: Date.now(),
-                data: form.data.value,
-                descricao: form.descricao.value,
-                valor: parseFloat(form.valor.value) || 0
-            };
-            userData.adiantamentosData.push(newAdiantamento);
-            await saveUserData(userData);
-            form.reset();
-        });
-
-        // Remover Adiantamento
-        document.getElementById('adiantamentos-list').addEventListener('click', async (e) => {
-            if (e.target.closest('.remove-adiantamento-btn')) {
-                const id = parseInt(e.target.closest('.remove-adiantamento-btn').dataset.id);
-                userData.adiantamentosData = userData.adiantamentosData.filter(item => item.id !== id);
-                await saveUserData(userData);
-            }
-        });
-
-        // Formulário de Serviço Extra
-        document.getElementById('add-servico-extra-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const form = e.target;
-            const newServicoExtra = {
-                id: Date.now(),
-                data: form.data.value,
-                descricao: form.descricao.value,
-                valor: parseFloat(form.valor.value) || 0
-            };
-            userData.servicosExtrasData.push(newServicoExtra);
-            await saveUserData(userData);
-            form.reset();
-        });
-
-        // Remover Serviço Extra
-        document.getElementById('servicos-extras-list').addEventListener('click', async (e) => {
-            if (e.target.closest('.remove-servico-extra-btn')) {
-                const id = parseInt(e.target.closest('.remove-servico-extra-btn').dataset.id);
-                userData.servicosExtrasData = userData.servicosExtrasData.filter(item => item.id !== id);
-                await saveUserData(userData);
-            }
-        });
-
-        // Gerar Checklist
-        document.getElementById('generate-checklist-btn').addEventListener('click', () => {
-            const servico = document.getElementById('input-obra-servico').value.trim();
-            if (!servico) {
-                showCustomAlert("Aviso", "Por favor, preencha a Descrição do Serviço para gerar uma checklist.");
-                return;
-            }
-
-            let checklistItems = ['Verificar materiais necessários', 'Limpar e preparar o local', 'Realizar medições e marcações'];
-            if (servico.toLowerCase().includes('pintura')) {
-                checklistItems = ['Proteger áreas não pintadas', 'Lixar e limpar as paredes', 'Aplicar massa corrida', 'Aplicar selador', 'Dar demãos de tinta'];
-            } else if (servico.toLowerCase().includes('piso')) {
-                checklistItems = ['Remover o piso antigo', 'Preparar a base (contrapiso)', 'Assentar o novo piso', 'Aplicar rejunte', 'Limpar e proteger o novo piso'];
-            }
-            
-            const listText = checklistItems.map(item => - ${item}).join('\n');
-            showCustomAlert("Checklist Gerada", listText);
-        });
-
-        // Gerar Relatório
-        document.getElementById('generate-report-btn').addEventListener('click', () => {
-            const adiantamentosReport = userData.adiantamentosData.map(a => - Data: ${formatDate(a.data)}, Descrição: ${a.descricao}, Valor: ${formatCurrency(a.valor)}).join('\n') || '- Nenhum adiantamento registrado.';
-            const servicosExtrasReport = userData.servicosExtrasData.map(a => - Data: ${formatDate(a.data)}, Descrição: ${a.descricao}, Valor: ${formatCurrency(a.valor)}).join('\n') || '- Nenhum serviço extra registrado.';
-            
-            const totalAdiantado = userData.adiantamentosData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
-            const totalServicosExtras = userData.servicosExtrasData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
-            const totalObra = (userData.obraData.valorMaoObra || 0) + totalServicosExtras;
-            const saldoRestante = totalObra - totalAdiantado;
-
-            const reportText = `
-                Relatório Financeiro
-                ------------------------
-                Nome da Obra: ${userData.obraData.nome || 'N/A'}
-                Início da Obra: ${formatDate(userData.obraData.dataInicio)}
-                Serviço: ${userData.obraData.servico || 'N/A'}
-
-                Histórico de Adiantamentos:
-                ${adiantamentosReport}
-
-                Serviços Extras:
-                ${servicosExtrasReport}
-                
-                Resumo Financeiro:
-                Valor da Mão de Obra: ${formatCurrency(userData.obraData.valorMaoObra || 0)}
-                Total da Obra (com extras): ${formatCurrency(totalObra)}
-                Total Adiantado: ${formatCurrency(totalAdiantado)}
-                Saldo Restante: ${formatCurrency(saldoRestante)}
-            `;
-            showCustomAlert("Relatório Financeiro", reportText);
-        });
-
-        document.getElementById('close-modal-btn').addEventListener('click', hideCustomAlert);
-
-    </script>
-</body>
-</html>
+export default App;
