@@ -1,338 +1,592 @@
-import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import {
-    getAuth,
-    signInWithCustomToken,
-    onAuthStateChanged,
-    createUserWithEmailAndPassword,
-    signInWithEmailAndPassword,
-    signOut
-} from 'firebase/auth';
-import {
-    getFirestore,
-    collection,
-    addDoc,
-    onSnapshot,
-    query,
-    where,
-    doc,
-    deleteDoc
-} from 'firebase/firestore';
-
-// Variáveis de configuração do ambiente, por favor não altere
-const firebaseConfig = typeof _firebase_config !== 'undefined' ? JSON.parse(_firebase_config) : {};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-// Inicializa o Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// Use lucide-react para ícones modernos
-import { LogOut, UserPlus, LogIn, Save, Trash2, Loader } from 'lucide-react';
-
-const App = () => {
-    // Estados para gerenciar a autenticação e dados
-    const [user, setUser] = useState(null);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [dataText, setDataText] = useState('');
-    const [userData, setUserData] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [isLoginMode, setIsLoginMode] = useState(true);
-
-    // Efeito para inicializar a autenticação e o listener do Firestore
-    useEffect(() => {
-        const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
-            if (currentUser) {
-                setUser(currentUser);
-            } else {
-                setUser(null);
-            }
-            setIsLoading(false);
-        });
-
-        // Se o token de autenticação inicial existir, faz o login personalizado
-        const signInWithToken = async () => {
-            if (initialAuthToken) {
-                try {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } catch (e) {
-                    console.error("Erro ao fazer login com token personalizado:", e);
-                }
-            }
-        };
-        signInWithToken();
-
-        return () => unsubscribeAuth();
-    }, []);
-
-    // Efeito para buscar dados do usuário em tempo real
-    useEffect(() => {
-        if (!user) {
-            setUserData([]);
-            return;
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerenciador de Obras</title>
+    <!-- Inclui o Tailwind CSS para estilização -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
         }
-
-        const userId = user.uid;
-        // Caminho da coleção privada do usuário
-        const userRef = collection(db, 'artifacts', appId, 'users', userId, 'userData');
-        const q = query(userRef);
-
-        // Listener em tempo real para a coleção de dados do usuário
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setUserData(items);
-        }, (e) => {
-            console.error("Erro ao carregar dados do usuário:", e);
-            setError("Não foi possível carregar os dados.");
-        });
-
-        return () => unsubscribe();
-    }, [user]);
-
-    // Lida com o cadastro de um novo usuário
-    const handleSignUp = async (e) => {
-        e.preventDefault();
-        setError(null);
-        try {
-            await createUserWithEmailAndPassword(auth, email, password);
-        } catch (e) {
-            console.error("Erro ao cadastrar:", e.message);
-            if (e.code === 'auth/email-already-in-use') {
-                setError("O e-mail já está em uso. Tente fazer login.");
-            } else if (e.code === 'auth/weak-password') {
-                setError("A senha é muito fraca. Use pelo menos 6 caracteres.");
-            } else if (e.code === 'auth/invalid-email') {
-                setError("O e-mail é inválido.");
-            } else {
-                setError("Erro no cadastro. Tente novamente.");
-            }
+        .container {
+            max-width: 640px;
+            margin-left: auto;
+            margin-right: auto;
         }
-    };
-
-    // Lida com o login de um usuário existente
-    const handleSignIn = async (e) => {
-        e.preventDefault();
-        setError(null);
-        try {
-            await signInWithEmailAndPassword(auth, email, password);
-        } catch (e) {
-            console.error("Erro ao fazer login:", e.message);
-            if (e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found') {
-                setError("E-mail ou senha incorretos.");
-            } else {
-                setError("Erro no login. Tente novamente.");
-            }
+        .input-field {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            transition: all 0.2s;
         }
-    };
-
-    // Lida com o logout do usuário
-    const handleSignOut = async () => {
-        setError(null);
-        try {
-            await signOut(auth);
-        } catch (e) {
-            console.error("Erro ao sair:", e.message);
-            setError("Erro ao sair. Tente novamente.");
+        .input-field:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
         }
-    };
+    </style>
+</head>
+<body class="bg-gray-100 p-4">
 
-    // Salva um novo item no Firestore
-    const saveData = async () => {
-        if (!dataText.trim()) return;
-        if (!user) {
-            setError("Você precisa estar logado para salvar dados.");
-            return;
-        }
+    <!-- Tela de Carregamento -->
+    <div id="loading-screen" class="flex justify-center items-center h-screen">
+        <div class="text-gray-600">Carregando...</div>
+    </div>
 
-        try {
-            const userId = user.uid;
-            const userRef = collection(db, 'artifacts', appId, 'users', userId, 'userData');
-            await addDoc(userRef, {
-                text: dataText,
-                createdAt: new Date()
-            });
-            setDataText('');
-        } catch (e) {
-            console.error("Erro ao salvar dados:", e.message);
-            setError("Não foi possível salvar os dados. Tente novamente.");
-        }
-    };
-
-    // Deleta um item do Firestore
-    const deleteData = async (id) => {
-        if (!user) {
-            setError("Você precisa estar logado para deletar dados.");
-            return;
-        }
-        try {
-            const userId = user.uid;
-            const docRef = doc(db, 'artifacts', appId, 'users', userId, 'userData', id);
-            await deleteDoc(docRef);
-        } catch (e) {
-            console.error("Erro ao deletar dados:", e.message);
-            setError("Não foi possível deletar o item.");
-        }
-    };
-    
-    // UI de carregamento
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-900">
-                <div className="flex items-center text-white text-2xl animate-pulse">
-                    <Loader className="animate-spin mr-3" />
-                    Carregando...
-                </div>
-            </div>
-        );
-    }
-    
-    return (
-        <div className="bg-gray-900 text-white min-h-screen font-sans flex items-center justify-center p-4">
-            <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-xl">
-                {/* Cabeçalho */}
-                <h1 className="text-4xl font-bold text-center text-purple-400 mb-6">
-                    Meu Aplicativo Pessoal
-                </h1>
-                
-                {/* Exibição do user ID para depuração */}
-                {user && (
-                    <div className="mb-4 p-3 bg-gray-700 rounded-lg text-sm break-all">
-                        <p className="font-semibold text-gray-400">ID do Usuário:</p>
-                        <p>{user.uid}</p>
-                    </div>
-                )}
-                
-                {/* Exibe erros se houver */}
-                {error && (
-                    <div className="bg-red-500 text-white p-3 rounded-lg mb-4 text-center">
-                        {error}
-                    </div>
-                )}
-                
-                {/* Conteúdo condicional (Login/Cadastro vs. Dashboard) */}
-                {!user ? (
-                    // Formulário de Login/Cadastro
-                    <div>
-                        <div className="flex justify-center mb-6">
-                            <button
-                                onClick={() => setIsLoginMode(true)}
-                                className={px-6 py-2 rounded-l-full text-lg font-semibold transition-colors duration-300 ${isLoginMode ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}}
-                            >
-                                Login
-                            </button>
-                            <button
-                                onClick={() => setIsLoginMode(false)}
-                                className={px-6 py-2 rounded-r-full text-lg font-semibold transition-colors duration-300 ${!isLoginMode ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}}
-                            >
-                                Cadastrar
-                            </button>
-                        </div>
-                        
-                        <form onSubmit={isLoginMode ? handleSignIn : handleSignUp} className="space-y-4">
-                            <div>
-                                <label className="block text-gray-300 mb-1">E-mail</label>
-                                <input
-                                    type="email"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="seu_email@exemplo.com"
-                                    className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-purple-500 focus:outline-none"
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-gray-300 mb-1">Senha</label>
-                                <input
-                                    type="password"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    placeholder="Sua senha (mínimo 6 caracteres)"
-                                    className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-purple-500 focus:outline-none"
-                                    required
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                className="w-full p-3 mt-6 bg-purple-600 text-white font-bold rounded-lg shadow-lg hover:bg-purple-700 transition-colors duration-300 flex items-center justify-center space-x-2"
-                            >
-                                {isLoginMode ? (
-                                    <>
-                                        <LogIn size={20} />
-                                        <span>Entrar</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <UserPlus size={20} />
-                                        <span>Cadastrar</span>
-                                    </>
-                                )}
-                            </button>
-                        </form>
-                    </div>
-                ) : (
-                    // Dashboard do usuário logado
-                    <div>
-                        <div className="flex items-center justify-between mb-6">
-                            <h2 className="text-2xl font-semibold">Olá, {user.email}!</h2>
-                            <button
-                                onClick={handleSignOut}
-                                className="bg-red-500 text-white p-2 rounded-lg hover:bg-red-600 transition-colors duration-300 flex items-center space-x-2"
-                            >
-                                <LogOut size={20} />
-                                <span>Sair</span>
-                            </button>
-                        </div>
-
-                        {/* Formulário para adicionar novos dados */}
-                        <div className="mb-6">
-                            <label className="block text-gray-300 mb-1">Adicionar novo item:</label>
-                            <div className="flex space-x-2">
-                                <input
-                                    type="text"
-                                    value={dataText}
-                                    onChange={(e) => setDataText(e.target.value)}
-                                    placeholder="Digite algo para salvar..."
-                                    className="flex-grow p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-purple-500 focus:outline-none"
-                                />
-                                <button
-                                    onClick={saveData}
-                                    className="p-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-300 flex items-center justify-center"
-                                >
-                                    <Save size={20} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Lista de dados salvos */}
-                        <div className="space-y-3">
-                            <h3 className="text-xl font-bold text-purple-400">Seus Dados Salvos:</h3>
-                            {userData.length === 0 ? (
-                                <p className="text-gray-400 text-center p-4 bg-gray-700 rounded-lg">Nenhum dado salvo ainda.</p>
-                            ) : (
-                                <ul className="space-y-2">
-                                    {userData.map(item => (
-                                        <li key={item.id} className="flex items-center justify-between p-3 bg-gray-700 rounded-lg shadow-md">
-                                            <span className="text-gray-200">{item.text}</span>
-                                            <button
-                                                onClick={() => deleteData(item.id)}
-                                                className="text-red-400 hover:text-red-500 transition-colors duration-300"
-                                            >
-                                                <Trash2 size={20} />
-                                            </button>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </div>
-                    </div>
-                )}
+    <!-- Tela Inicial -->
+    <div id="initial-screen" class="hidden flex flex-col items-center justify-center h-screen text-center">
+        <h1 class="text-3xl font-bold text-gray-900 mb-4">Bem-vindo, Hilton Serviço!</h1>
+        <p class="text-center text-gray-600 mb-8">
+            Para começar, escolha uma das opções abaixo.
+        </p>
+        <button id="new-project-btn" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-600 transition-colors mb-4">
+            Novo Projeto ✨
+        </button>
+        <div class="w-full text-center my-4 text-gray-500">
+            <p>ou</p>
+        </div>
+        <div class="w-full bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Carregar Projeto Existente</h2>
+            <p class="text-sm text-gray-600 mb-4">
+                Cole o seu ID de usuário para carregar os dados de outro dispositivo.
+            </p>
+            <div class="flex flex-col space-y-4">
+                <input id="input-user-id" type="text" placeholder="Cole seu ID de usuário aqui" class="input-field" />
+                <button id="load-project-btn" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition-colors">
+                    Carregar Dados
+                </button>
             </div>
         </div>
-    );
-};
+    </div>
 
-export default App;
+    <!-- Aplicativo Principal -->
+    <div id="main-app" class="hidden container">
+        <header class="text-center mt-8 mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">Gerenciador de Obras</h1>
+            <p class="text-gray-600 mt-2">Acompanhe adiantamentos e o saldo da sua obra.</p>
+            
+            <div class="mt-4 p-4 bg-yellow-100 rounded-xl border-2 border-yellow-300 flex flex-col sm:flex-row items-center justify-between">
+                <div class="flex flex-col text-left">
+                    <span class="text-sm font-bold text-gray-800">Seu ID de Usuário (Importante)</span>
+                    <span id="display-user-id" class="text-sm font-mono break-all text-gray-600 mt-1"></span>
+                </div>
+                <button id="copy-user-id-btn" class="mt-2 sm:mt-0 px-4 py-2 bg-yellow-500 text-white text-sm font-bold rounded-full hover:bg-yellow-600 transition-colors">
+                    Copiar
+                </button>
+            </div>
+        </header>
+        
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-900">Detalhes da Obra</h2>
+                <button id="edit-obra-btn" class="bg-blue-500 text-white rounded-full px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
+                    Editar
+                </button>
+            </div>
+            
+            <div id="display-obra-data" class="space-y-3">
+                <div class="flex items-center space-x-3 text-lg">
+                    <span class="text-blue-500">🏠</span>
+                    <span><strong class="font-semibold">Obra:</strong> <span id="display-obra-nome">N/A</span></span>
+                </div>
+                <div class="flex items-center space-x-3 text-lg">
+                    <span class="text-blue-500">💲</span>
+                    <span><strong class="font-semibold">Mão de Obra:</strong> <span id="display-obra-valor">R$ 0,00</span></span>
+                </div>
+                <div class="flex items-center space-x-3 text-lg">
+                    <span class="text-blue-500">🗓</span>
+                    <span><strong class="font-semibold">Início:</strong> <span id="display-obra-data-inicio">N/A</span></span>
+                </div>
+                <div class="flex items-center space-x-3 text-lg">
+                    <span class="text-blue-500">📝</span>
+                    <span><strong class="font-semibold">Serviço:</strong> <span id="display-obra-servico">N/A</span></span>
+                </div>
+            </div>
+
+            <form id="edit-obra-form" class="hidden space-y-4">
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Nome da Obra:</label>
+                    <input id="input-obra-nome" type="text" placeholder="Ex: Reforma da Casa" class="input-field" />
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Início da Obra:</label>
+                    <input id="input-obra-data" type="date" class="input-field" />
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Valor da Mão de Obra (R$):</label>
+                    <input id="input-obra-valor" type="number" placeholder="0.00" class="input-field" />
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Metros Quadrados (m²):</label>
+                    <input id="input-obra-metro" type="number" placeholder="0" class="input-field" />
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Descrição do Serviço:</label>
+                    <textarea id="input-obra-servico" rows="3" placeholder="Ex: Assentamento de piso, pintura, reboco." class="input-field"></textarea>
+                </div>
+                <button type="submit" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-600 transition-colors">
+                    Salvar Detalhes
+                </button>
+                <button type="button" id="generate-checklist-btn" class="w-full bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-indigo-600 transition-colors">
+                    Gerar Checklist ✨
+                </button>
+            </form>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Adicionar Adiantamento (Vale)</h2>
+            <form id="add-adiantamento-form" class="space-y-4">
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Data:</label>
+                    <input type="date" name="data" required class="input-field" />
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Descrição:</label>
+                    <input type="text" name="descricao" placeholder="Ex: Vale semanal" class="input-field" />
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Valor (R$):</label>
+                    <input type="number" name="valor" placeholder="0.00" required class="input-field" />
+                </div>
+                <button type="submit" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition-colors">
+                    <span class="text-lg">+</span> Adicionar Vale
+                </button>
+            </form>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Histórico de Adiantamentos</h2>
+            <ul id="adiantamentos-list" class="divide-y divide-gray-200">
+                <!-- Adiantamentos serão renderizados aqui -->
+            </ul>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Adicionar Serviços Extras</h2>
+            <form id="add-servico-extra-form" class="space-y-4">
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Data:</label>
+                    <input type="date" name="data" required class="input-field" />
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Descrição:</label>
+                    <input type="text" name="descricao" placeholder="Ex: Compra de cimento, trabalho extra" class="input-field" />
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Valor (R$):</label>
+                    <input type="number" name="valor" placeholder="0.00" required class="input-field" />
+                </div>
+                <button type="submit" class="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-orange-600 transition-colors">
+                    <span class="text-lg">+</span> Adicionar Serviço Extra
+                </button>
+            </form>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Histórico de Serviços Extras</h2>
+            <ul id="servicos-extras-list" class="divide-y divide-gray-200">
+                <!-- Serviços extras serão renderizados aqui -->
+            </ul>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Resumo Financeiro</h2>
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
+                    <p class="text-sm font-medium text-gray-500">Total da Obra</p>
+                    <p id="total-obra-valor" class="text-lg font-bold text-gray-800">R$ 0,00</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
+                    <p class="text-sm font-medium text-gray-500">Total Adiantado</p>
+                    <p id="total-adiantado-valor" class="text-lg font-bold text-green-600">R$ 0,00</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
+                    <p class="text-sm font-medium text-gray-500">Saldo Restante</p>
+                    <p id="saldo-restante-valor" class="text-lg font-bold text-green-600">R$ 0,00</p>
+                </div>
+            </div>
+            <button id="generate-report-btn" class="w-full bg-purple-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-purple-600 transition-colors mt-4">
+                Gerar Relatório ✨
+            </button>
+        </div>
+
+        <footer class="text-center text-sm text-gray-500 mt-6 pb-4">
+            <p>Desenvolvido com ❤</p>
+        </footer>
+    </div>
+
+    <!-- Modal de Alerta -->
+    <div id="custom-alert-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="mt-3 text-center">
+                <h3 id="modal-title" class="text-lg leading-6 font-medium text-gray-900"></h3>
+                <div class="mt-2 px-7 py-3">
+                    <p id="modal-content" class="text-sm text-gray-500"></p>
+                </div>
+                <div class="items-center px-4 py-3">
+                    <button id="close-modal-btn" class="px-4 py-2 bg-blue-500 text-white text-base font-medium rounded-md w-full shadow-sm hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        OK
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Inclui as bibliotecas do Firebase -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Variáveis de ambiente
+        const firebaseConfig = typeof _firebase_config !== 'undefined' ? JSON.parse(_firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // Variáveis globais para o estado do aplicativo
+        let db, auth;
+        let userId = null;
+        let isEditingObra = false;
+        let userData = {
+            obraData: {},
+            adiantamentosData: [],
+            servicosExtrasData: []
+        };
+        
+        // Funções de utilidade
+        const formatCurrency = (value) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+        const formatDate = (dateString) => dateString ? new Date(dateString).toLocaleDateString('pt-BR') : 'N/A';
+
+        const showCustomAlert = (title, message) => {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-content').textContent = message;
+            document.getElementById('custom-alert-modal').classList.remove('hidden');
+        };
+
+        const hideCustomAlert = () => {
+            document.getElementById('custom-alert-modal').classList.add('hidden');
+        };
+
+        // Renderiza o aplicativo na tela
+        const renderApp = () => {
+            // Esconde a tela de carregamento e inicial, mostra o app principal
+            document.getElementById('loading-screen').classList.add('hidden');
+            document.getElementById('initial-screen').classList.add('hidden');
+            document.getElementById('main-app').classList.remove('hidden');
+
+            // Renderiza os dados da obra
+            if (isEditingObra) {
+                document.getElementById('display-obra-data').classList.add('hidden');
+                document.getElementById('edit-obra-form').classList.remove('hidden');
+                document.getElementById('edit-obra-btn').textContent = 'Cancelar';
+
+                document.getElementById('input-obra-nome').value = userData.obraData.nome || '';
+                document.getElementById('input-obra-data').value = userData.obraData.dataInicio || '';
+                document.getElementById('input-obra-valor').value = userData.obraData.valorMaoObra || 0;
+                document.getElementById('input-obra-metro').value = userData.obraData.metroQuadrado || 0;
+                document.getElementById('input-obra-servico').value = userData.obraData.servico || '';
+            } else {
+                document.getElementById('display-obra-data').classList.remove('hidden');
+                document.getElementById('edit-obra-form').classList.add('hidden');
+                document.getElementById('edit-obra-btn').textContent = 'Editar';
+
+                document.getElementById('display-obra-nome').textContent = userData.obraData.nome || 'N/A';
+                document.getElementById('display-obra-valor').textContent = formatCurrency(userData.obraData.valorMaoObra || 0);
+                document.getElementById('display-obra-data-inicio').textContent = formatDate(userData.obraData.dataInicio);
+                document.getElementById('display-obra-servico').textContent = userData.obraData.servico || 'N/A';
+            }
+            
+            // Renderiza o ID do usuário
+            document.getElementById('display-user-id').textContent = userId || 'N/A';
+
+            // Renderiza a lista de adiantamentos
+            const adiantamentosList = document.getElementById('adiantamentos-list');
+            adiantamentosList.innerHTML = userData.adiantamentosData.length > 0
+                ? userData.adiantamentosData.map(item => `
+                    <li class="py-4 flex items-center justify-between">
+                        <div>
+                            <p class="font-medium text-gray-900">${item.descricao || 'Adiantamento'}</p>
+                            <p class="text-sm text-gray-500">${formatDate(item.data)}</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <p class="text-md font-semibold text-gray-700">${formatCurrency(item.valor)}</p>
+                            <button class="remove-adiantamento-btn p-1 text-red-500 rounded-full hover:bg-red-100 transition-colors" data-id="${item.id}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                            </button>
+                        </div>
+                    </li>
+                `).join('')
+                : '<p class="text-center text-gray-500 py-4">Nenhum adiantamento registrado.</p>';
+
+            // Renderiza a lista de serviços extras
+            const servicosExtrasList = document.getElementById('servicos-extras-list');
+            servicosExtrasList.innerHTML = userData.servicosExtrasData.length > 0
+                ? userData.servicosExtrasData.map(item => `
+                    <li class="py-4 flex items-center justify-between">
+                        <div>
+                            <p class="font-medium text-gray-900">${item.descricao || 'Serviço Extra'}</p>
+                            <p class="text-sm text-gray-500">${formatDate(item.data)}</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <p class="text-md font-semibold text-gray-700">${formatCurrency(item.valor)}</p>
+                            <button class="remove-servico-extra-btn p-1 text-red-500 rounded-full hover:bg-red-100 transition-colors" data-id="${item.id}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                            </button>
+                        </div>
+                    </li>
+                `).join('')
+                : '<p class="text-center text-gray-500 py-4">Nenhum serviço extra registrado.</p>';
+
+            // Renderiza o resumo financeiro
+            const totalAdiantado = userData.adiantamentosData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+            const totalServicosExtras = userData.servicosExtrasData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+            const totalObra = (userData.obraData.valorMaoObra || 0) + totalServicosExtras;
+            const saldoRestante = totalObra - totalAdiantado;
+
+            document.getElementById('total-obra-valor').textContent = formatCurrency(totalObra);
+            document.getElementById('total-adiantado-valor').textContent = formatCurrency(totalAdiantado);
+            
+            const saldoElement = document.getElementById('saldo-restante-valor');
+            saldoElement.textContent = formatCurrency(saldoRestante);
+            saldoElement.classList.toggle('text-red-600', saldoRestante < 0);
+            saldoElement.classList.toggle('text-green-600', saldoRestante >= 0);
+        };
+
+        // Salva os dados no Firestore
+        const saveUserData = async (data) => {
+            if (!db || !userId) {
+                showCustomAlert("Erro de Sincronização", "Não foi possível salvar os dados. Verifique a sua conexão.");
+                return;
+            }
+            try {
+                const obraRef = doc(db, 'artifacts', appId, 'users', userId, 'data', 'obra');
+                await setDoc(obraRef, data);
+            } catch (e) {
+                console.error("Erro ao salvar dados:", e);
+                showCustomAlert("Erro de Sincronização", "Não foi possível salvar os dados. Tente novamente.");
+            }
+        };
+
+        // Event Listeners
+        window.onload = async () => {
+            // Inicializa o Firebase
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+            } catch (e) {
+                console.error("Erro ao inicializar o Firebase:", e);
+                showCustomAlert("Erro Crítico", "Não foi possível iniciar o aplicativo. Verifique sua conexão com a internet.");
+                return;
+            }
+
+            // Autentica o usuário
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    userId = user.uid;
+                    document.getElementById('loading-screen').classList.add('hidden');
+                    document.getElementById('initial-screen').classList.remove('hidden');
+                } else {
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) {
+                        console.error("Erro na autenticação:", e);
+                        showCustomAlert("Erro de Autenticação", "Não foi possível autenticar. Tente recarregar a página.");
+                    }
+                }
+            });
+        };
+
+        // Botão Novo Projeto
+        document.getElementById('new-project-btn').addEventListener('click', async () => {
+            userData = {
+                obraData: {},
+                adiantamentosData: [],
+                servicosExtrasData: []
+            };
+            await saveUserData(userData);
+            
+            const obraRef = doc(db, 'artifacts', appId, 'users', userId, 'data', 'obra');
+            onSnapshot(obraRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    userData = docSnap.data();
+                    renderApp();
+                }
+            });
+
+            document.getElementById('initial-screen').classList.add('hidden');
+            document.getElementById('main-app').classList.remove('hidden');
+        });
+
+        // Botão Carregar Projeto
+        document.getElementById('load-project-btn').addEventListener('click', async () => {
+            const inputUserId = document.getElementById('input-user-id').value;
+            if (!inputUserId) {
+                showCustomAlert("Aviso", "Por favor, insira um ID de usuário.");
+                return;
+            }
+
+            try {
+                const obraRef = doc(db, 'artifacts', appId, 'users', inputUserId, 'data', 'obra');
+                const docSnap = await getDoc(obraRef);
+                if (docSnap.exists()) {
+                    userId = inputUserId;
+                    onSnapshot(obraRef, (docSnap) => {
+                        userData = docSnap.data();
+                        renderApp();
+                    });
+                    document.getElementById('initial-screen').classList.add('hidden');
+                    document.getElementById('main-app').classList.remove('hidden');
+                } else {
+                    showCustomAlert("Erro", "ID de usuário não encontrado.");
+                }
+            } catch (e) {
+                console.error("Erro ao carregar dados:", e);
+                showCustomAlert("Erro", "Erro ao carregar dados. Verifique o ID e sua conexão.");
+            }
+        });
+
+        // Botão Copiar ID
+        document.getElementById('copy-user-id-btn').addEventListener('click', () => {
+            const userIdText = document.getElementById('display-user-id').textContent;
+            navigator.clipboard.writeText(userIdText).then(() => {
+                showCustomAlert("Sucesso", "ID de usuário copiado para a área de transferência!");
+            }).catch(err => {
+                showCustomAlert("Erro", "Não foi possível copiar o ID. Tente novamente.");
+            });
+        });
+
+        // Botão Editar Obra
+        document.getElementById('edit-obra-btn').addEventListener('click', () => {
+            isEditingObra = !isEditingObra;
+            renderApp();
+        });
+
+        // Formulário de Edição da Obra
+        document.getElementById('edit-obra-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            userData.obraData = {
+                nome: document.getElementById('input-obra-nome').value,
+                dataInicio: document.getElementById('input-obra-data').value,
+                valorMaoObra: parseFloat(document.getElementById('input-obra-valor').value) || 0,
+                metroQuadrado: parseFloat(document.getElementById('input-obra-metro').value) || 0,
+                servico: document.getElementById('input-obra-servico').value,
+            };
+            await saveUserData(userData);
+            isEditingObra = false;
+            renderApp();
+        });
+
+        // Formulário de Adiantamento
+        document.getElementById('add-adiantamento-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const newAdiantamento = {
+                id: Date.now(),
+                data: form.data.value,
+                descricao: form.descricao.value,
+                valor: parseFloat(form.valor.value) || 0
+            };
+            userData.adiantamentosData.push(newAdiantamento);
+            await saveUserData(userData);
+            form.reset();
+        });
+
+        // Remover Adiantamento
+        document.getElementById('adiantamentos-list').addEventListener('click', async (e) => {
+            if (e.target.closest('.remove-adiantamento-btn')) {
+                const id = parseInt(e.target.closest('.remove-adiantamento-btn').dataset.id);
+                userData.adiantamentosData = userData.adiantamentosData.filter(item => item.id !== id);
+                await saveUserData(userData);
+            }
+        });
+
+        // Formulário de Serviço Extra
+        document.getElementById('add-servico-extra-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const newServicoExtra = {
+                id: Date.now(),
+                data: form.data.value,
+                descricao: form.descricao.value,
+                valor: parseFloat(form.valor.value) || 0
+            };
+            userData.servicosExtrasData.push(newServicoExtra);
+            await saveUserData(userData);
+            form.reset();
+        });
+
+        // Remover Serviço Extra
+        document.getElementById('servicos-extras-list').addEventListener('click', async (e) => {
+            if (e.target.closest('.remove-servico-extra-btn')) {
+                const id = parseInt(e.target.closest('.remove-servico-extra-btn').dataset.id);
+                userData.servicosExtrasData = userData.servicosExtrasData.filter(item => item.id !== id);
+                await saveUserData(userData);
+            }
+        });
+
+        // Gerar Checklist
+        document.getElementById('generate-checklist-btn').addEventListener('click', () => {
+            const servico = document.getElementById('input-obra-servico').value.trim();
+            if (!servico) {
+                showCustomAlert("Aviso", "Por favor, preencha a Descrição do Serviço para gerar uma checklist.");
+                return;
+            }
+
+            let checklistItems = ['Verificar materiais necessários', 'Limpar e preparar o local', 'Realizar medições e marcações'];
+            if (servico.toLowerCase().includes('pintura')) {
+                checklistItems = ['Proteger áreas não pintadas', 'Lixar e limpar as paredes', 'Aplicar massa corrida', 'Aplicar selador', 'Dar demãos de tinta'];
+            } else if (servico.toLowerCase().includes('piso')) {
+                checklistItems = ['Remover o piso antigo', 'Preparar a base (contrapiso)', 'Assentar o novo piso', 'Aplicar rejunte', 'Limpar e proteger o novo piso'];
+            }
+            
+            const listText = checklistItems.map(item => - ${item}).join('\n');
+            showCustomAlert("Checklist Gerada", listText);
+        });
+
+        // Gerar Relatório
+        document.getElementById('generate-report-btn').addEventListener('click', () => {
+            const adiantamentosReport = userData.adiantamentosData.map(a => - Data: ${formatDate(a.data)}, Descrição: ${a.descricao}, Valor: ${formatCurrency(a.valor)}).join('\n') || '- Nenhum adiantamento registrado.';
+            const servicosExtrasReport = userData.servicosExtrasData.map(a => - Data: ${formatDate(a.data)}, Descrição: ${a.descricao}, Valor: ${formatCurrency(a.valor)}).join('\n') || '- Nenhum serviço extra registrado.';
+            
+            const totalAdiantado = userData.adiantamentosData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+            const totalServicosExtras = userData.servicosExtrasData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+            const totalObra = (userData.obraData.valorMaoObra || 0) + totalServicosExtras;
+            const saldoRestante = totalObra - totalAdiantado;
+
+            const reportText = `
+                Relatório Financeiro
+                ------------------------
+                Nome da Obra: ${userData.obraData.nome || 'N/A'}
+                Início da Obra: ${formatDate(userData.obraData.dataInicio)}
+                Serviço: ${userData.obraData.servico || 'N/A'}
+
+                Histórico de Adiantamentos:
+                ${adiantamentosReport}
+
+                Serviços Extras:
+                ${servicosExtrasReport}
+                
+                Resumo Financeiro:
+                Valor da Mão de Obra: ${formatCurrency(userData.obraData.valorMaoObra || 0)}
+                Total da Obra (com extras): ${formatCurrency(totalObra)}
+                Total Adiantado: ${formatCurrency(totalAdiantado)}
+                Saldo Restante: ${formatCurrency(saldoRestante)}
+            `;
+            showCustomAlert("Relatório Financeiro", reportText);
+        });
+
+        document.getElementById('close-modal-btn').addEventListener('click', hideCustomAlert);
+
+    </script>
+</body>
+</html>
