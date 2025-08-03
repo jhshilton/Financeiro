@@ -1,0 +1,339 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import {
+    getAuth,
+    signInWithCustomToken,
+    onAuthStateChanged,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    signOut
+} from 'firebase/auth';
+import {
+    getFirestore,
+    collection,
+    addDoc,
+    onSnapshot,
+    query,
+    where,
+    doc,
+    deleteDoc
+} from 'firebase/firestore';
+
+// Variáveis de configuração do ambiente, por favor não altere
+const firebaseConfig = typeof _firebase_config !== 'undefined' ? JSON.parse(_firebase_config) : {};
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// Inicializa o Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Use lucide-react para ícones modernos
+import { LogOut, UserPlus, LogIn, Save, Trash2, Loader } from 'lucide-react';
+
+const App = () => {
+    // Estados para gerenciar a autenticação e dados
+    const [user, setUser] = useState(null);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [dataText, setDataText] = useState('');
+    const [userData, setUserData] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [isLoginMode, setIsLoginMode] = useState(true);
+
+    // Efeito para inicializar a autenticação e o listener do Firestore
+    useEffect(() => {
+        const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+            if (currentUser) {
+                setUser(currentUser);
+            } else {
+                setUser(null);
+            }
+            setIsLoading(false);
+        });
+
+        // Se o token de autenticação inicial existir, faz o login personalizado
+        const signInWithToken = async () => {
+            if (initialAuthToken) {
+                try {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } catch (e) {
+                    console.error("Erro ao fazer login com token personalizado:", e);
+                }
+            }
+        };
+        signInWithToken();
+
+        return () => unsubscribeAuth();
+    }, []);
+
+    // Efeito para buscar dados do usuário em tempo real
+    useEffect(() => {
+        if (!user) {
+            setUserData([]);
+            return;
+        }
+
+        const userId = user.uid;
+        // Caminho da coleção privada do usuário
+        const userRef = collection(db, 'artifacts', appId, 'users', userId, 'userData');
+        const q = query(userRef);
+
+        // Listener em tempo real para a coleção de dados do usuário
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setUserData(items);
+        }, (e) => {
+            console.error("Erro ao carregar dados do usuário:", e);
+            setError("Não foi possível carregar os dados.");
+        });
+
+        return () => unsubscribe();
+    }, [user]);
+
+    // Lida com o cadastro de um novo usuário
+    const handleSignUp = async (e) => {
+        e.preventDefault();
+        setError(null);
+        try {
+            await createUserWithEmailAndPassword(auth, email, password);
+        } catch (e) {
+            console.error("Erro ao cadastrar:", e.message);
+            if (e.code === 'auth/email-already-in-use') {
+                setError("O e-mail já está em uso. Tente fazer login.");
+            } else if (e.code === 'auth/weak-password') {
+                setError("A senha é muito fraca. Use pelo menos 6 caracteres.");
+            } else if (e.code === 'auth/invalid-email') {
+                setError("O e-mail é inválido.");
+            } else {
+                setError("Erro no cadastro. Tente novamente.");
+            }
+        }
+    };
+
+    // Lida com o login de um usuário existente
+    const handleSignIn = async (e) => {
+        e.preventDefault();
+        setError(null);
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+        } catch (e) {
+            console.error("Erro ao fazer login:", e.message);
+            if (e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found') {
+                setError("E-mail ou senha incorretos.");
+            } else {
+                setError("Erro no login. Tente novamente.");
+            }
+        }
+    };
+
+    // Lida com o logout do usuário
+    const handleSignOut = async () => {
+        setError(null);
+        try {
+            await signOut(auth);
+        } catch (e) {
+            console.error("Erro ao sair:", e.message);
+            setError("Erro ao sair. Tente novamente.");
+        }
+    };
+
+    // Salva um novo item no Firestore
+    const saveData = async () => {
+        if (!dataText.trim()) return;
+        if (!user) {
+            setError("Você precisa estar logado para salvar dados.");
+            return;
+        }
+
+        try {
+            const userId = user.uid;
+            const userRef = collection(db, 'artifacts', appId, 'users', userId, 'userData');
+            await addDoc(userRef, {
+                text: dataText,
+                createdAt: new Date()
+            });
+            setDataText('');
+        } catch (e) {
+            console.error("Erro ao salvar dados:", e.message);
+            setError("Não foi possível salvar os dados. Tente novamente.");
+        }
+    };
+
+    // Deleta um item do Firestore
+    const deleteData = async (id) => {
+        if (!user) {
+            setError("Você precisa estar logado para deletar dados.");
+            return;
+        }
+        try {
+            const userId = user.uid;
+            const docRef = doc(db, 'artifacts', appId, 'users', userId, 'userData', id);
+            await deleteDoc(docRef);
+        } catch (e) {
+            console.error("Erro ao deletar dados:", e.message);
+            setError("Não foi possível deletar o item.");
+        }
+    };
+    
+    // UI de carregamento
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-900">
+                <div className="flex items-center text-white text-2xl animate-pulse">
+                    <Loader className="animate-spin mr-3" />
+                    Carregando...
+                </div>
+            </div>
+        );
+    }
+    
+    return (
+        <div className="bg-gray-900 text-white min-h-screen font-sans flex items-center justify-center p-4">
+            <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-xl">
+                {/* Cabeçalho */}
+                <h1 className="text-4xl font-bold text-center text-purple-400 mb-6">
+                    Meu Aplicativo Pessoal
+                </h1>
+                
+                {/* Exibição do user ID para depuração */}
+                {user && (
+                    <div className="mb-4 p-3 bg-gray-700 rounded-lg text-sm break-all">
+                        <p className="font-semibold text-gray-400">ID do Usuário:</p>
+                        <p>{user.uid}</p>
+                    </div>
+                )}
+                
+                {/* Exibe erros se houver */}
+                {error && (
+                    <div className="bg-red-500 text-white p-3 rounded-lg mb-4 text-center">
+                        {error}
+                    </div>
+                )}
+                
+                {/* Conteúdo condicional (Login/Cadastro vs. Dashboard) */}
+                {!user ? (
+                    // Formulário de Login/Cadastro
+                    <div>
+                        <div className="flex justify-center mb-6">
+                            <button
+                                onClick={() => setIsLoginMode(true)}
+                                className={px-6 py-2 rounded-l-full text-lg font-semibold transition-colors duration-300 ${isLoginMode ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}}
+                            >
+                                Login
+                            </button>
+                            <button
+                                onClick={() => setIsLoginMode(false)}
+                                className={px-6 py-2 rounded-r-full text-lg font-semibold transition-colors duration-300 ${!isLoginMode ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}}
+                            >
+                                Cadastrar
+                            </button>
+                        </div>
+                        
+                        <form onSubmit={isLoginMode ? handleSignIn : handleSignUp} className="space-y-4">
+                            <div>
+                                <label className="block text-gray-300 mb-1">E-mail</label>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    placeholder="seu_email@exemplo.com"
+                                    className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-purple-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-gray-300 mb-1">Senha</label>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Sua senha (mínimo 6 caracteres)"
+                                    className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-purple-500 focus:outline-none"
+                                    required
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                className="w-full p-3 mt-6 bg-purple-600 text-white font-bold rounded-lg shadow-lg hover:bg-purple-700 transition-colors duration-300 flex items-center justify-center space-x-2"
+                            >
+                                {isLoginMode ? (
+                                    <>
+                                        <LogIn size={20} />
+                                        <span>Entrar</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <UserPlus size={20} />
+                                        <span>Cadastrar</span>
+                                    </>
+                                )}
+                            </button>
+                        </form>
+                    </div>
+                ) : (
+                    // Dashboard do usuário logado
+                    <div>
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-2xl font-semibold">Olá, {user.email}!</h2>
+                            <button
+                                onClick={handleSignOut}
+                                className="bg-red-500 text-white p-2 rounded-lg hover:bg-red-600 transition-colors duration-300 flex items-center space-x-2"
+                            >
+                                <LogOut size={20} />
+                                <span>Sair</span>
+                            </button>
+                        </div>
+
+                        {/* Formulário para adicionar novos dados */}
+                        <div className="mb-6">
+                            <label className="block text-gray-300 mb-1">Adicionar novo item:</label>
+                            <div className="flex space-x-2">
+                                <input
+                                    type="text"
+                                    value={dataText}
+                                    onChange={(e) => setDataText(e.target.value)}
+                                    placeholder="Digite algo para salvar..."
+                                    className="flex-grow p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-purple-500 focus:outline-none"
+                                />
+                                <button
+                                    onClick={saveData}
+                                    className="p-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-300 flex items-center justify-center"
+                                >
+                                    <Save size={20} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Lista de dados salvos */}
+                        <div className="space-y-3">
+                            <h3 className="text-xl font-bold text-purple-400">Seus Dados Salvos:</h3>
+                            {userData.length === 0 ? (
+                                <p className="text-gray-400 text-center p-4 bg-gray-700 rounded-lg">Nenhum dado salvo ainda.</p>
+                            ) : (
+                                <ul className="space-y-2">
+                                    {userData.map(item => (
+                                        <li key={item.id} className="flex items-center justify-between p-3 bg-gray-700 rounded-lg shadow-md">
+                                            <span className="text-gray-200">{item.text}</span>
+                                            <button
+                                                onClick={() => deleteData(item.id)}
+                                                className="text-red-400 hover:text-red-500 transition-colors duration-300"
+                                            >
+                                                <Trash2 size={20} />
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default App;
+
