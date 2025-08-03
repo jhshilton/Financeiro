@@ -3,45 +3,688 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gerenciador de Obras</title>
-    <!-- Tailwind CSS -->
+    <title>Gerenciador de Obras Hilton</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            padding: 1rem;
+        }
+        input, textarea, select {
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            width: 100%;
+            transition: all 0.2s ease-in-out;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        .modal-content {
+            background-color: #fff;
+            margin: 15% auto;
+            padding: 20px;
+            border-radius: 1rem;
+            width: 90%;
+            max-width: 500px;
+        }
+        .close-button {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body class="bg-gray-100">
-    <div id="app" class="container mx-auto p-4">
-        <!-- Seu conteúdo será renderizado aqui -->
-    </div>
 
-    <script>
-        // Configuração do Firebase (substitua com suas credenciais)
-        const firebaseConfig = {
-            apiKey: "SUA_API_KEY",
-            authDomain: "SEU_PROJETO.firebaseapp.com",
-            projectId: "SEU_PROJETO",
-            storageBucket: "SEU_PROJETO.appspot.com",
-            messagingSenderId: "123456789",
-            appId: "1:123456789:web:abcdef123456"
-        };
+<div id="loading-screen" class="flex justify-center items-center h-screen">
+    <div class="text-gray-600">Carregando...</div>
+</div>
 
-        // Inicializa o Firebase
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+<div id="app-container" class="container hidden">
 
-        // Renderiza o app
-        document.getElementById("app").innerHTML = `
-            <h1 class="text-3xl font-bold text-center mb-6">Gerenciador de Obras</h1>
-            <div class="bg-white p-6 rounded-lg shadow-md">
-                <p class="text-green-600">Agora o Tailwind CSS está funcionando!</p>
-                <button class="bg-blue-500 text-white px-4 py-2 rounded mt-4 hover:bg-blue-600">
-                    Teste o Botão
+    <div id="initial-screen" class="flex flex-col items-center justify-center h-screen text-center">
+        <h1 class="text-3xl font-bold text-gray-900 mb-4">Bem-vindo, Hilton Serviço!</h1>
+        <p class="text-center text-gray-600 mb-8">
+            Para começar, escolha uma das opções abaixo.
+        </p>
+        <button id="new-project-btn" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-600 transition-colors mb-4">
+            Novo Projeto ✨
+        </button>
+        <div class="w-full text-center my-4 text-gray-500">
+            <p>ou</p>
+        </div>
+        <div class="w-full bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Carregar Projeto Existente</h2>
+            <p class="text-sm text-gray-600 mb-4">
+                Cole o seu ID de usuário que você copiou do seu outro dispositivo.
+            </p>
+            <div class="flex flex-col space-y-4">
+                <input id="input-user-id" type="text" placeholder="Cole seu ID de usuário aqui">
+                <button id="load-project-btn" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition-colors">
+                    Carregar Dados
                 </button>
             </div>
+        </div>
+    </div>
+
+    <div id="main-app" class="hidden">
+        <header class="text-center mt-8 mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">Gerenciador de Obras</h1>
+            <p class="text-gray-600 mt-2">Acompanhe adiantamentos e o saldo da sua obra.</p>
+            
+            <div id="user-id-container" class="mt-4 p-4 bg-yellow-100 rounded-xl border-2 border-yellow-300 flex flex-col sm:flex-row items-center justify-between">
+                <div class="flex flex-col text-left">
+                    <span class="text-sm font-bold text-gray-800">Seu ID de Usuário (Importante)</span>
+                    <span id="display-user-id" class="text-sm font-mono break-all text-gray-600 mt-1"></span>
+                </div>
+                <button id="copy-id-btn" class="mt-2 sm:mt-0 px-4 py-2 bg-yellow-500 text-white text-sm font-bold rounded-full hover:bg-yellow-600 transition-colors relative">
+                    Copiar
+                </button>
+            </div>
+        </header>
+
+        <!-- Card de informações da obra -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-900">Detalhes da Obra</h2>
+                <button id="edit-obra-btn" class="bg-blue-500 text-white rounded-full px-4 py-2 text-sm font-medium hover:bg-blue-600 transition-colors">
+                    Editar
+                </button>
+            </div>
+            
+            <div id="obra-display" class="space-y-3">
+                <div class="flex items-center space-x-3 text-lg">
+                    <span class="text-blue-500">🏠</span>
+                    <span><strong class="font-semibold">Obra:</strong> <span id="display-obra-nome">N/A</span></span>
+                </div>
+                <div class="flex items-center space-x-3 text-lg">
+                    <span class="text-blue-500">💲</span>
+                    <span><strong class="font-semibold">Mão de Obra:</strong> <span id="display-obra-valor">R$ 0,00</span></span>
+                </div>
+                <div class="flex items-center space-x-3 text-lg">
+                    <span class="text-blue-500">🗓</span>
+                    <span><strong class="font-semibold">Início:</strong> <span id="display-obra-data-inicio">N/A</span></span>
+                </div>
+                <div class="flex items-center space-x-3 text-lg">
+                    <span class="text-blue-500">📝</span>
+                    <span><strong class="font-semibold">Serviço:</strong> <span id="display-obra-servico">N/A</span></span>
+                </div>
+            </div>
+
+            <div id="obra-form" class="hidden space-y-4">
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Nome da Obra:</label>
+                    <input id="input-obra-nome" type="text" placeholder="Ex: Reforma da Casa">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Início da Obra:</label>
+                    <input id="input-obra-data" type="date">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Valor da Mão de Obra (R$):</label>
+                    <input id="input-obra-valor" type="number" placeholder="0.00">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Metros Quadrados (m²):</label>
+                    <input id="input-obra-metro" type="number" placeholder="0">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Descrição do Serviço:</label>
+                    <textarea id="input-obra-servico" rows="3" placeholder="Ex: Assentamento de piso, pintura, reboco."></textarea>
+                </div>
+                <button id="save-obra-btn" class="w-full bg-blue-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-600 transition-colors">
+                    Salvar Detalhes
+                </button>
+                <button id="generate-checklist-btn" class="w-full bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-indigo-600 transition-colors">
+                    Gerar Checklist ✨
+                </button>
+            </div>
+        </div>
+
+        <!-- Card para adicionar adiantamento -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Adicionar Adiantamento (Vale)</h2>
+            <form id="adiantamento-form" class="space-y-4">
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Data:</label>
+                    <input type="date" name="data" required>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Descrição:</label>
+                    <input type="text" name="descricao" placeholder="Ex: Vale semanal">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Valor (R$):</label>
+                    <input type="number" name="valor" placeholder="0.00" required>
+                </div>
+                <button type="submit" class="w-full bg-green-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-green-600 transition-colors">
+                    <span class="text-lg">+</span> Adicionar Vale
+                </button>
+            </form>
+        </div>
+
+        <!-- Card para a lista de adiantamentos -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Histórico de Adiantamentos</h2>
+            <ul id="adiantamentos-list" class="divide-y divide-gray-200">
+                <p id="no-adiantamentos" class="text-center text-gray-500 py-4">Nenhum adiantamento registrado.</p>
+            </ul>
+        </div>
+
+        <!-- Card para adicionar serviços extras -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Adicionar Serviços Extras</h2>
+            <form id="servico-extra-form" class="space-y-4">
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Data:</label>
+                    <input type="date" name="data" required>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Descrição:</label>
+                    <input type="text" name="descricao" placeholder="Ex: Compra de cimento, trabalho extra">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-sm font-medium mb-1">Valor (R$):</label>
+                    <input type="number" name="valor" placeholder="0.00" required>
+                </div>
+                <button type="submit" class="w-full bg-orange-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-orange-600 transition-colors">
+                    <span class="text-lg">+</span> Adicionar Serviço Extra
+                </button>
+            </form>
+        </div>
+
+        <!-- Card para a lista de serviços extras -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Histórico de Serviços Extras</h2>
+            <ul id="servicos-extras-list" class="divide-y divide-gray-200">
+                <p id="no-servicos-extras" class="text-center text-gray-500 py-4">Nenhum serviço extra registrado.</p>
+            </ul>
+        </div>
+
+        <!-- Card de resumo financeiro -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-900">Resumo Financeiro</h2>
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
+                    <p class="text-sm font-medium text-gray-500">Total da Obra</p>
+                    <p id="total-obra-valor" class="text-lg font-bold text-gray-800">R$ 0,00</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
+                    <p class="text-sm font-medium text-gray-500">Total Adiantado</p>
+                    <p id="total-adiantado-valor" class="text-lg font-bold text-green-600">R$ 0,00</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-xl shadow-inner">
+                    <p class="text-sm font-medium text-gray-500">Saldo Restante</p>
+                    <p id="saldo-restante-valor" class="text-lg font-bold text-green-600">R$ 0,00</p>
+                </div>
+            </div>
+            <button id="generate-report-btn" class="w-full bg-purple-500 text-white font-bold py-3 px-4 rounded-xl hover:bg-purple-600 transition-colors mt-4">
+                Gerar Relatório ✨
+            </button>
+        </div>
+
+        <footer class="text-center text-sm text-gray-500 mt-6 pb-4">
+            <p>Desenvolvido com ❤</p>
+        </footer>
+    </div>
+</div>
+
+<div id="modal" class="modal">
+    <div class="modal-content">
+        <span class="close-button">&times;</span>
+        <h3 id="modal-title" class="text-xl font-bold mb-4"></h3>
+        <div id="modal-body" class="prose max-w-none text-gray-800"></div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // Variáveis globais do ambiente
+    let firebaseConfig = {};
+    let initialAuthToken = null;
+    let appId = 'default-app-id';
+
+    // Verificação de variáveis do ambiente
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+        try {
+            firebaseConfig = JSON.parse(__firebase_config);
+        } catch (e) {
+            console.error("Erro ao fazer o parse da configuração do Firebase:", e);
+        }
+    }
+    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        initialAuthToken = __initial_auth_token;
+    }
+    if (typeof __app_id !== 'undefined' && __app_id) {
+        appId = __app_id;
+    }
+    
+    // Variáveis globais do app
+    let db;
+    let auth;
+    let userId = null;
+    let obraData = {};
+    let adiantamentosData = [];
+    let servicosExtrasData = [];
+
+    // Funções de utilidade
+    const formatCurrency = (value) => {
+        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+    };
+
+    const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
+        const [year, month, day] = dateString.split('-');
+        return ${day}/${month}/${year};
+    };
+    
+    const showModal = (title, content) => {
+        document.getElementById('modal-title').textContent = title;
+        document.getElementById('modal-body').innerHTML = content;
+        document.getElementById('modal').style.display = 'block';
+    };
+
+    const hideModal = () => {
+        document.getElementById('modal').style.display = 'none';
+    };
+
+    // Função de renderização principal
+    const renderApp = () => {
+        document.getElementById('loading-screen').classList.add('hidden');
+        document.getElementById('app-container').classList.remove('hidden');
+
+        // Renderiza os dados da obra
+        document.getElementById('display-obra-nome').textContent = obraData.nome || 'N/A';
+        document.getElementById('display-obra-valor').textContent = formatCurrency(obraData.valorMaoObra || 0);
+        document.getElementById('display-obra-data-inicio').textContent = formatDate(obraData.dataInicio);
+        document.getElementById('display-obra-servico').textContent = obraData.servico || 'N/A';
+
+        // Renderiza adiantamentos
+        const adiantamentosList = document.getElementById('adiantamentos-list');
+        adiantamentosList.innerHTML = '';
+        if (adiantamentosData.length > 0) {
+            document.getElementById('no-adiantamentos').classList.add('hidden');
+            adiantamentosData.forEach(adiantamento => {
+                const li = document.createElement('li');
+                li.className = 'py-4 flex items-center justify-between';
+                li.innerHTML = `
+                    <div>
+                        <p class="font-medium text-gray-900">${adiantamento.descricao || 'Adiantamento'}</p>
+                        <p class="text-sm text-gray-500">${formatDate(adiantamento.data)}</p>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <p class="text-md font-semibold text-gray-700">${formatCurrency(adiantamento.valor)}</p>
+                        <button class="remove-adiantamento-btn p-1 text-red-500 rounded-full hover:bg-red-100 transition-colors" data-id="${adiantamento.id}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                        </button>
+                    </div>
+                `;
+                adiantamentosList.appendChild(li);
+            });
+        } else {
+            document.getElementById('no-adiantamentos').classList.remove('hidden');
+        }
+
+        // Renderiza serviços extras
+        const servicosExtrasList = document.getElementById('servicos-extras-list');
+        servicosExtrasList.innerHTML = '';
+        if (servicosExtrasData.length > 0) {
+            document.getElementById('no-servicos-extras').classList.add('hidden');
+            servicosExtrasData.forEach(servico => {
+                const li = document.createElement('li');
+                li.className = 'py-4 flex items-center justify-between';
+                li.innerHTML = `
+                    <div>
+                        <p class="font-medium text-gray-900">${servico.descricao || 'Serviço Extra'}</p>
+                        <p class="text-sm text-gray-500">${formatDate(servico.data)}</p>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <p class="text-md font-semibold text-gray-700">${formatCurrency(servico.valor)}</p>
+                        <button class="remove-servico-extra-btn p-1 text-red-500 rounded-full hover:bg-red-100 transition-colors" data-id="${servico.id}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-trash-2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                        </button>
+                    </div>
+                `;
+                servicosExtrasList.appendChild(li);
+            });
+        } else {
+            document.getElementById('no-servicos-extras').classList.remove('hidden');
+        }
+
+        // Cálculos do resumo financeiro
+        const totalAdiantado = adiantamentosData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+        const totalServicosExtras = servicosExtrasData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+        const totalObra = (obraData.valorMaoObra || 0) + totalServicosExtras;
+        const saldoRestante = totalObra - totalAdiantado;
+
+        document.getElementById('total-obra-valor').textContent = formatCurrency(totalObra);
+        document.getElementById('total-adiantado-valor').textContent = formatCurrency(totalAdiantado);
+        
+        const saldoElement = document.getElementById('saldo-restante-valor');
+        saldoElement.textContent = formatCurrency(saldoRestante);
+        if (saldoRestante < 0) {
+            saldoElement.classList.remove('text-green-600');
+            saldoElement.classList.add('text-red-600');
+        } else {
+            saldoElement.classList.remove('text-red-600');
+            saldoElement.classList.add('text-green-600');
+        }
+
+        // Atualiza o ID do usuário
+        document.getElementById('display-user-id').textContent = userId;
+    };
+
+    // Configuração dos ouvintes do Firestore
+    const setupFirestoreListeners = () => {
+        if (!userId || !db || !appId) return;
+
+        const obraRef = doc(db, artifacts/${appId}/public/data/${userId}, 'currentObra');
+        const adiantamentosRef = collection(db, artifacts/${appId}/public/data/${userId}/adiantamentosData);
+        const servicosExtrasRef = collection(db, artifacts/${appId}/public/data/${userId}/servicosExtrasData);
+
+        onSnapshot(obraRef, (docSnap) => {
+            obraData = docSnap.exists() ? docSnap.data() : {};
+            renderApp();
+        });
+
+        onSnapshot(adiantamentosRef, (querySnapshot) => {
+            adiantamentosData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            renderApp();
+        });
+
+        onSnapshot(servicosExtrasRef, (querySnapshot) => {
+            servicosExtrasData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            renderApp();
+        });
+    };
+
+    // Inicialização do Firebase e autenticação
+    const initFirebase = async () => {
+        if (Object.keys(firebaseConfig).length === 0) {
+            console.error("Configurações do Firebase não encontradas.");
+            document.getElementById('loading-screen').innerHTML = '<div class="text-red-500">Erro: Configuração do Firebase não encontrada.</div>';
+            return;
+        }
+
+        try {
+            const firebaseApp = initializeApp(firebaseConfig);
+            db = getFirestore(firebaseApp);
+            auth = getAuth(firebaseApp);
+            
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    userId = user.uid;
+                    document.getElementById('initial-screen').classList.add('hidden');
+                    document.getElementById('main-app').classList.remove('hidden');
+                    setupFirestoreListeners();
+                    renderApp();
+                } else {
+                    document.getElementById('loading-screen').classList.add('hidden');
+                    document.getElementById('app-container').classList.remove('hidden');
+                    document.getElementById('initial-screen').classList.remove('hidden');
+                    document.getElementById('main-app').classList.add('hidden');
+                }
+            });
+
+            if (initialAuthToken) {
+                await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+        } catch (error) {
+            console.error("Erro na inicialização do Firebase ou autenticação:", error);
+            document.getElementById('loading-screen').innerHTML = <div class="text-red-500">Erro crítico: Falha na inicialização. Detalhes: ${error.message}</div>;
+        }
+    };
+
+    // Lida com a criação de um novo projeto
+    document.getElementById('new-project-btn').addEventListener('click', async () => {
+        try {
+            await signInAnonymously(auth);
+        } catch (error) {
+            console.error("Erro ao criar novo projeto:", error);
+            showModal('Erro', 'Não foi possível criar um novo projeto. Por favor, tente novamente.');
+        }
+    });
+
+    // Lida com o carregamento de um projeto existente
+    document.getElementById('load-project-btn').addEventListener('click', () => {
+        const inputId = document.getElementById('input-user-id').value.trim();
+        if (inputId) {
+            userId = inputId;
+            document.getElementById('initial-screen').classList.add('hidden');
+            document.getElementById('main-app').classList.remove('hidden');
+            setupFirestoreListeners();
+            renderApp();
+        } else {
+            showModal('Atenção', 'Por favor, insira um ID de usuário válido.');
+        }
+    });
+
+    // Lida com o botão de edição/salvar da obra
+    let isEditingObra = false;
+    document.getElementById('edit-obra-btn').addEventListener('click', () => {
+        const obraDisplay = document.getElementById('obra-display');
+        const obraForm = document.getElementById('obra-form');
+        const editBtn = document.getElementById('edit-obra-btn');
+        if (isEditingObra) {
+            obraDisplay.classList.remove('hidden');
+            obraForm.classList.add('hidden');
+            editBtn.textContent = 'Editar';
+        } else {
+            document.getElementById('input-obra-nome').value = obraData.nome || '';
+            document.getElementById('input-obra-data').value = obraData.dataInicio || '';
+            document.getElementById('input-obra-valor').value = obraData.valorMaoObra || 0;
+            document.getElementById('input-obra-metro').value = obraData.metroQuadrado || 0;
+            document.getElementById('input-obra-servico').value = obraData.servico || '';
+
+            obraDisplay.classList.add('hidden');
+            obraForm.classList.remove('hidden');
+            editBtn.textContent = 'Cancelar';
+        }
+        isEditingObra = !isEditingObra;
+    });
+
+    document.getElementById('save-obra-btn').addEventListener('click', async () => {
+        if (!userId) return;
+        const newObraData = {
+            nome: document.getElementById('input-obra-nome').value,
+            dataInicio: document.getElementById('input-obra-data').value,
+            valorMaoObra: parseFloat(document.getElementById('input-obra-valor').value) || 0,
+            metroQuadrado: parseFloat(document.getElementById('input-obra-metro').value) || 0,
+            servico: document.getElementById('input-obra-servico').value
+        };
+        try {
+            await setDoc(doc(db, artifacts/${appId}/public/data/${userId}, 'currentObra'), newObraData);
+            document.getElementById('edit-obra-btn').click(); // Volta para o modo de exibição
+        } catch (e) {
+            console.error("Erro ao salvar a obra: ", e);
+            showModal('Erro', 'Não foi possível salvar os dados da obra.');
+        }
+    });
+    
+    // Lida com a submissão do formulário de adiantamento
+    document.getElementById('adiantamento-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!userId) return;
+        const formData = new FormData(e.target);
+        const newAdiantamento = {
+            data: formData.get('data'),
+            descricao: formData.get('descricao'),
+            valor: parseFloat(formData.get('valor')) || 0
+        };
+        try {
+            await addDoc(collection(db, artifacts/${appId}/public/data/${userId}/adiantamentosData), newAdiantamento);
+            e.target.reset();
+        } catch (e) {
+            console.error("Erro ao adicionar adiantamento: ", e);
+            showModal('Erro', 'Não foi possível adicionar o adiantamento.');
+        }
+    });
+
+    // Lida com a submissão do formulário de serviço extra
+    document.getElementById('servico-extra-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!userId) return;
+        const formData = new FormData(e.target);
+        const newServicoExtra = {
+            data: formData.get('data'),
+            descricao: formData.get('descricao'),
+            valor: parseFloat(formData.get('valor')) || 0
+        };
+        try {
+            await addDoc(collection(db, artifacts/${appId}/public/data/${userId}/servicosExtrasData), newServicoExtra);
+            e.target.reset();
+        } catch (e) {
+            console.error("Erro ao adicionar serviço extra: ", e);
+            showModal('Erro', 'Não foi possível adicionar o serviço extra.');
+        }
+    });
+    
+    // Lida com a remoção de itens
+    document.getElementById('adiantamentos-list').addEventListener('click', async (e) => {
+        if (e.target.closest('.remove-adiantamento-btn')) {
+            const id = e.target.closest('.remove-adiantamento-btn').dataset.id;
+            try {
+                await deleteDoc(doc(db, artifacts/${appId}/public/data/${userId}/adiantamentosData, id));
+            } catch (e) {
+                console.error("Erro ao remover adiantamento: ", e);
+                showModal('Erro', 'Não foi possível remover o adiantamento.');
+            }
+        }
+    });
+    
+    document.getElementById('servicos-extras-list').addEventListener('click', async (e) => {
+        if (e.target.closest('.remove-servico-extra-btn')) {
+            const id = e.target.closest('.remove-servico-extra-btn').dataset.id;
+            try {
+                await deleteDoc(doc(db, artifacts/${appId}/public/data/${userId}/servicosExtrasData, id));
+            } catch (e) {
+                console.error("Erro ao remover serviço extra: ", e);
+                showModal('Erro', 'Não foi possível remover o serviço extra.');
+            }
+        }
+    });
+
+    // Lida com o botão de copiar ID
+    document.getElementById('copy-id-btn').addEventListener('click', () => {
+        if (!userId) return;
+        const tempInput = document.createElement('textarea');
+        tempInput.value = userId;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        
+        const copyBtn = document.getElementById('copy-id-btn');
+        copyBtn.textContent = 'Copiado!';
+        setTimeout(() => {
+            copyBtn.textContent = 'Copiar';
+        }, 2000);
+    });
+
+    // Lida com a geração de checklist
+    document.getElementById('generate-checklist-btn').addEventListener('click', () => {
+        const servico = obraData.servico.trim();
+        if (!servico) {
+            showModal('Atenção', 'Por favor, preencha a <strong>Descrição do Serviço</strong> para gerar uma checklist.');
+            return;
+        }
+
+        let checklistItems = ['Verificar materiais necessários', 'Limpar e preparar o local', 'Realizar medições e marcações'];
+        if (servico.toLowerCase().includes('pintura')) {
+            checklistItems = ['Proteger áreas não pintadas', 'Lixar e limpar as paredes', 'Aplicar massa corrida', 'Aplicar selador', 'Dar demãos de tinta'];
+        } else if (servico.toLowerCase().includes('piso')) {
+            checklistItems = ['Remover o piso antigo', 'Preparar a base (contrapiso)', 'Assentar o novo piso', 'Aplicar rejunte', 'Limpar e proteger o novo piso'];
+        }
+
+        const listHtml = checklistItems.map(item => <li><input type="checkbox" class="mr-2">${item}</li>).join('');
+        showModal('Checklist Gerada', <ul class="list-none space-y-2">${listHtml}</ul>);
+    });
+    
+    // Lida com a geração de relatório
+    document.getElementById('generate-report-btn').addEventListener('click', () => {
+        const totalAdiantado = adiantamentosData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+        const totalServicosExtras = servicosExtrasData.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+        const totalObra = (obraData.valorMaoObra || 0) + totalServicosExtras;
+        const saldoRestante = totalObra - totalAdiantado;
+
+        const adiantamentosReport = adiantamentosData.map(a => - <strong>Data:</strong> ${formatDate(a.data)}, <strong>Descrição:</strong> ${a.descricao}, <strong>Valor:</strong> ${formatCurrency(a.valor)}).join('<br>') || '- Nenhum adiantamento registrado.';
+        const servicosExtrasReport = servicosExtrasData.map(a => - <strong>Data:</strong> ${formatDate(a.data)}, <strong>Descrição:</strong> ${a.descricao}, <strong>Valor:</strong> ${formatCurrency(a.valor)}).join('<br>') || '- Nenhum serviço extra registrado.';
+        
+        const reportText = `
+            <p><strong>Nome:</strong> ${obraData.nome || 'N/A'}</p>
+            <p><strong>Início:</strong> ${formatDate(obraData.dataInicio)}</p>
+            <p><strong>Serviço:</strong> ${obraData.servico || 'N/A'}</p>
+            
+            <h3 class="text-lg font-semibold mt-4">Histórico de Adiantamentos</h3>
+            ${adiantamentosReport}
+
+            <h3 class="text-lg font-semibold mt-4">Serviços Extras</h3>
+            ${servicosExtrasReport}
+            
+            <h3 class="text-lg font-semibold mt-4">Resumo Financeiro</h3>
+            <p><strong>Valor da Mão de Obra:</strong> ${formatCurrency(obraData.valorMaoObra)}</p>
+            <p><strong>Total da Obra:</strong> ${formatCurrency(totalObra)}</p>
+            <p><strong>Total Adiantado:</strong> ${formatCurrency(totalAdiantado)}</p>
+            <p><strong>Saldo Restante:</strong> ${formatCurrency(saldoRestante)}</p>
         `;
-    </script>
+        showModal('Relatório Financeiro', reportText);
+    });
+
+    // Lida com o fechamento do modal
+    document.querySelector('.close-button').addEventListener('click', hideModal);
+    window.addEventListener('click', (e) => {
+        if (e.target === document.getElementById('modal')) {
+            hideModal();
+        }
+    });
+
+    // Inicializa o Firebase quando a janela estiver totalmente carregada
+    window.onload = initFirebase;
+</script>
+
 </body>
 </html>
