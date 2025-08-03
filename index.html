@@ -3,51 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Financeiro Pessoal</title>
-    <!-- Tailwind CSS (via CDN) -->
+    <title>Gerenciador de Obras</title>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
 </head>
-<body class="bg-gray-900 text-white min-h-screen p-4">
-    <div class="max-w-md mx-auto">
-        <h1 class="text-2xl font-bold text-center mb-6">Meu Financeiro</h1>
-        
-        <!-- Formulário de Login -->
-        <div id="login-form" class="bg-gray-800 p-6 rounded-lg mb-4">
-            <h2 class="text-xl font-semibold mb-4">Login</h2>
-            <input type="email" id="email" placeholder="Seu e-mail" class="w-full p-2 mb-3 rounded bg-gray-700">
-            <input type="password" id="password" placeholder="Sua senha" class="w-full p-2 mb-3 rounded bg-gray-700">
-            <button onclick="login()" class="w-full bg-purple-600 p-2 rounded hover:bg-purple-700">Entrar</button>
-            <p class="text-center mt-3">Não tem conta? <button onclick="switchToSignup()" class="text-blue-400">Cadastre-se</button></p>
-        </div>
-
-        <!-- Formulário de Cadastro (oculto inicialmente) -->
-        <div id="signup-form" class="bg-gray-800 p-6 rounded-lg mb-4 hidden">
-            <h2 class="text-xl font-semibold mb-4">Cadastro</h2>
-            <input type="email" id="signup-email" placeholder="Seu e-mail" class="w-full p-2 mb-3 rounded bg-gray-700">
-            <input type="password" id="signup-password" placeholder="Sua senha" class="w-full p-2 mb-3 rounded bg-gray-700">
-            <button onclick="signup()" class="w-full bg-green-600 p-2 rounded hover:bg-green-700">Cadastrar</button>
-            <p class="text-center mt-3">Já tem conta? <button onclick="switchToLogin()" class="text-blue-400">Faça login</button></p>
-        </div>
-
-        <!-- Área logada (inicialmente oculta) -->
-        <div id="app-content" class="hidden">
-            <div class="bg-gray-800 p-6 rounded-lg mb-4">
-                <h2 class="text-xl font-semibold mb-4">Adicionar Item</h2>
-                <input type="text" id="item-text" placeholder="Digite algo..." class="w-full p-2 mb-3 rounded bg-gray-700">
-                <button onclick="saveData()" class="w-full bg-blue-600 p-2 rounded hover:bg-blue-700">Salvar</button>
-            </div>
-
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-xl font-semibold mb-4">Seus Itens</h2>
-                <div id="user-data" class="space-y-2">
-                    <!-- Itens serão carregados aqui -->
-                </div>
-            </div>
-        </div>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto p-4">
+        <!-- Seu conteúdo será renderizado aqui -->
     </div>
 
     <script>
@@ -66,93 +32,16 @@
         const auth = firebase.auth();
         const db = firebase.firestore();
 
-        // Funções de autenticação
-        function switchToSignup() {
-            document.getElementById("login-form").classList.add("hidden");
-            document.getElementById("signup-form").classList.remove("hidden");
-        }
-
-        function switchToLogin() {
-            document.getElementById("signup-form").classList.add("hidden");
-            document.getElementById("login-form").classList.remove("hidden");
-        }
-
-        function login() {
-            const email = document.getElementById("email").value;
-            const password = document.getElementById("password").value;
-            
-            auth.signInWithEmailAndPassword(email, password)
-                .then(() => {
-                    alert("Login realizado!");
-                    loadUserData();
-                })
-                .catch((error) => {
-                    alert("Erro: " + error.message);
-                });
-        }
-
-        function signup() {
-            const email = document.getElementById("signup-email").value;
-            const password = document.getElementById("signup-password").value;
-            
-            auth.createUserWithEmailAndPassword(email, password)
-                .then(() => {
-                    alert("Cadastro realizado!");
-                    switchToLogin();
-                })
-                .catch((error) => {
-                    alert("Erro: " + error.message);
-                });
-        }
-
-        // Carrega os dados do usuário
-        function loadUserData() {
-            document.getElementById("login-form").classList.add("hidden");
-            document.getElementById("app-content").classList.remove("hidden");
-            
-            const userId = auth.currentUser.uid;
-            db.collection("userData").where("userId", "==", userId)
-                .onSnapshot((snapshot) => {
-                    const userDataDiv = document.getElementById("user-data");
-                    userDataDiv.innerHTML = "";
-                    
-                    snapshot.forEach((doc) => {
-                        const data = doc.data();
-                        userDataDiv.innerHTML += `
-                            <div class="bg-gray-700 p-3 rounded flex justify-between">
-                                <span>${data.text}</span>
-                                <button onclick="deleteItem('${doc.id}')" class="text-red-400">Excluir</button>
-                            </div>
-                        `;
-                    });
-                });
-        }
-
-        // Salva um novo item
-        function saveData() {
-            const text = document.getElementById("item-text").value;
-            const userId = auth.currentUser.uid;
-            
-            db.collection("userData").add({
-                text: text,
-                userId: userId,
-                createdAt: new Date()
-            }).then(() => {
-                document.getElementById("item-text").value = "";
-            });
-        }
-
-        // Deleta um item
-        function deleteItem(id) {
-            db.collection("userData").doc(id).delete();
-        }
-
-        // Verifica se o usuário já está logado ao carregar a página
-        auth.onAuthStateChanged((user) => {
-            if (user) {
-                loadUserData();
-            }
-        });
+        // Renderiza o app
+        document.getElementById("app").innerHTML = `
+            <h1 class="text-3xl font-bold text-center mb-6">Gerenciador de Obras</h1>
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <p class="text-green-600">Agora o Tailwind CSS está funcionando!</p>
+                <button class="bg-blue-500 text-white px-4 py-2 rounded mt-4 hover:bg-blue-600">
+                    Teste o Botão
+                </button>
+            </div>
+        `;
     </script>
 </body>
 </html>
